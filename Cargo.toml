@@ -1,0 +1,15 @@
+[package]
+name = "amiquip"
+version = "0.1.0"
+authors = ["John Gallagher <jgallagher@bignerdranch.com>"]
+edition = "2018"
+
+[dependencies]
+failure = "0.1"
+input_buffer = "0.2"
+bytes = "0.4"
+amq-protocol = "1.4"
+log = "0.4"
+
+[dev-dependencies]
+mockstream = "0.0.3"
