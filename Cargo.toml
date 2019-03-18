@@ -10,6 +10,8 @@ input_buffer = "0.2"
 bytes = "0.4"
 amq-protocol = "1.4"
 log = "0.4"
+mio = "0.6"
+mio-extras = "2.0"
 
 [dev-dependencies]
 mockstream = "0.0.3"

@@ -1,5 +1,6 @@
 mod errors;
-mod frame_buffer;
+pub mod frame_buffer;
+pub mod heartbeats;
 
 pub use errors::{ErrorKind, Result};
 
