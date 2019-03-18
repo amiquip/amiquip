@@ -1,3 +1,4 @@
+use amq_protocol::frame::AMQPFrame;
 use failure::{Backtrace, Context, Fail};
 use std::{fmt, result};
 
@@ -33,7 +34,7 @@ impl fmt::Display for Error {
 }
 
 /// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
+#[derive(Clone, Debug, PartialEq, Fail)]
 pub enum ErrorKind {
     #[fail(display = "underlying socket closed unexpectedly")]
     UnexpectedSocketClose,
@@ -52,6 +53,33 @@ pub enum ErrorKind {
 
     #[fail(display = "requested frame max is too small (min = {})", _0)]
     FrameMaxTooSmall(u32),
+
+    #[fail(display = "timeout occurred while waiting for socket events")]
+    SocketPollTimeout,
+
+    #[fail(display = "internal serialization error (THIS IS A BUG)")]
+    InternalSerializationError,
+
+    #[fail(display = "SASL secure/secure-ok exchanges are not supported")]
+    SaslSecureNotSupported,
+
+    #[fail(display = "invalid credentials")]
+    InvalidCredentials,
+
+    #[fail(display = "handshake failure - server sent a frame unexpectedly")]
+    HandshakeUnexpectedServerFrame(AMQPFrame),
+
+    #[fail(display = "handshake protocol failure - expected {} frame", _0)]
+    HandshakeWrongServerFrame(&'static str, AMQPFrame),
+
+    #[fail(display = "missed heartbeats from server")]
+    MissedServerHeartbeats,
+
+    #[fail(display = "server closed connection (code={} message={})", _0, _1)]
+    ServerClosedConnection(u16, String),
+
+    #[fail(display = "client closed connection (code={} message={})", _0, _1)]
+    ClientClosedConnection(u16, String),
 
     #[doc(hidden)]
     #[fail(display = "invalid error case")]

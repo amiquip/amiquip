@@ -13,6 +13,10 @@ amq-protocol = "1.4"
 log = "0.4"
 mio = "0.6"
 mio-extras = "2.0"
+cookie-factory = "0.2"
+
+# only for test binary - remove later
+env_logger = "0.6"
 
 [build-dependencies]
 built = "0.3"
