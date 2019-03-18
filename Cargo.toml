@@ -3,6 +3,7 @@ name = "amiquip"
 version = "0.1.0"
 authors = ["John Gallagher <jgallagher@bignerdranch.com>"]
 edition = "2018"
+build = "build.rs"
 
 [dependencies]
 failure = "0.1"
@@ -12,6 +13,9 @@ amq-protocol = "1.4"
 log = "0.4"
 mio = "0.6"
 mio-extras = "2.0"
+
+[build-dependencies]
+built = "0.3"
 
 [dev-dependencies]
 mockstream = "0.0.3"

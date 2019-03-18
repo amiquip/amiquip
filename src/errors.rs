@@ -44,6 +44,15 @@ pub enum ErrorKind {
     #[fail(display = "I/O error")]
     Io,
 
+    #[fail(display = "requested auth mechanism unavailable (available = {})", _0)]
+    UnsupportedAuthMechanism(String),
+
+    #[fail(display = "requested locale unavailable (available = {})", _0)]
+    UnsupportedLocale(String),
+
+    #[fail(display = "requested frame max is too small (min = {})", _0)]
+    FrameMaxTooSmall(u32),
+
     #[doc(hidden)]
     #[fail(display = "invalid error case")]
     __Nonexhaustive,
