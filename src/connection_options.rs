@@ -6,13 +6,14 @@ use amq_protocol::types::{AMQPValue, FieldTable};
 use std::time::Duration;
 
 pub struct ConnectionOptions<Auth: Sasl> {
-    pub auth: Auth,
-    pub virtual_host: String,
-    pub locale: String,
-    pub channel_max: u16,
-    pub frame_max: u32,
-    pub heartbeat: u16,
-    pub poll_timeout: Option<Duration>,
+    pub(crate) auth: Auth,
+    pub(crate) virtual_host: String,
+    pub(crate) locale: String,
+    pub(crate) channel_max: u16,
+    pub(crate) frame_max: u32,
+    pub(crate) heartbeat: u16,
+    pub(crate) poll_timeout: Option<Duration>,
+    pub(crate) io_thread_channel_bound: usize,
 }
 
 impl<Auth: Sasl> Default for ConnectionOptions<Auth> {
@@ -25,6 +26,9 @@ impl<Auth: Sasl> Default for ConnectionOptions<Auth> {
             frame_max: 1 << 17,
             heartbeat: 60,
             poll_timeout: None,
+
+            // TODO what is a reasonable default here?
+            io_thread_channel_bound: 8,
         }
     }
 }
@@ -66,6 +70,13 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
     pub fn poll_timeout(self, poll_timeout: Option<Duration>) -> Self {
         ConnectionOptions {
             poll_timeout,
+            ..self
+        }
+    }
+
+    pub fn io_thread_channel_bound(self, io_thread_channel_bound: usize) -> Self {
+        ConnectionOptions {
+            io_thread_channel_bound,
             ..self
         }
     }

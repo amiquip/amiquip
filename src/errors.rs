@@ -1,4 +1,5 @@
 use amq_protocol::frame::AMQPFrame;
+use amq_protocol::protocol::AMQPClass;
 use failure::{Backtrace, Context, Fail};
 use std::sync::Arc;
 use std::{fmt, result};
@@ -90,6 +91,18 @@ pub enum ErrorKind {
 
     #[fail(display = "event loop thread died (no further information available)")]
     EventLoopDropped,
+
+    #[fail(display = "channel {} dropped without being cleanly closed", _0)]
+    ChannelDropped(u16),
+
+    #[fail(display = "AMQP protocol error - received unexpected response")]
+    BadRpcResponse(AMQPClass),
+
+    #[fail(display = "fork failed")]
+    ForkFailed,
+
+    #[fail(display = "requested channel id {} is unavailable", _0)]
+    UnavailableChannelId(u16),
 
     #[doc(hidden)]
     #[fail(display = "invalid error case")]

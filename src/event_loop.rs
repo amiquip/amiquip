@@ -1,14 +1,17 @@
 use crate::auth::Sasl;
+use crate::channel::ChannelHandle;
 use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::heartbeats::{Heartbeat, HeartbeatState};
-use crate::serialize::{IntoAmqpClass, OutputBuffer};
+use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass};
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
-use amq_protocol::protocol::connection::{AMQPMethod, Close, CloseOk};
+use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
+use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
+use amq_protocol::protocol::connection::{Close, CloseOk};
 use amq_protocol::protocol::constants::REPLY_SUCCESS as AMQP_REPLY_SUCCESS;
 use amq_protocol::protocol::{AMQPClass, AMQPHardError};
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use failure::{Fail, ResultExt};
 use log::{debug, error, info, trace, warn};
 use mio::net::TcpStream;
@@ -17,7 +20,9 @@ use mio_extras::channel::sync_channel as mio_sync_channel;
 use mio_extras::channel::Receiver as MioReceiver;
 use mio_extras::channel::SyncSender as MioSyncSender;
 use mio_extras::timer::Timer;
+use std::collections::hash_map::{Entry, HashMap};
 use std::io;
+use std::result::Result as StdResult;
 use std::sync::mpsc::TryRecvError;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -58,24 +63,24 @@ impl ConnectionState {
     fn process<Auth: Sasl>(&mut self, inner: &mut Inner<Auth>, frame: AMQPFrame) -> Result<()> {
         match self {
             ConnectionState::Start => match frame {
-                AMQPFrame::Method(0, AMQPClass::Connection(AMQPMethod::Start(start))) => {
+                AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Start(start))) => {
                     debug!("received handshake {:?}", start);
                     let start_ok = inner.options.make_start_ok(start)?;
                     debug!("sending handshake {:?}", start_ok);
-                    inner.push_method(0, AMQPMethod::StartOk(start_ok))?;
+                    inner.push_method(0, AmqpConnection::StartOk(start_ok))?;
                     *self = ConnectionState::Secure;
                     Ok(())
                 }
                 _ => Err(ErrorKind::HandshakeWrongServerFrame("start", frame))?,
             },
             ConnectionState::Secure => match &frame {
-                AMQPFrame::Method(0, AMQPClass::Connection(AMQPMethod::Secure(secure))) => {
+                AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Secure(secure))) => {
                     // We currently only support PLAIN and EXTERNAL, neither of which
                     // need a secure/secure-ok
                     debug!("received handshake {:?}", secure);
                     Err(ErrorKind::SaslSecureNotSupported)?
                 }
-                AMQPFrame::Method(0, AMQPClass::Connection(AMQPMethod::Tune(_))) => {
+                AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Tune(_))) => {
                     *self = ConnectionState::Tune;
                     self.process(inner, frame)
                 }
@@ -85,7 +90,7 @@ impl ConnectionState {
                 ))?,
             },
             ConnectionState::Tune => match frame {
-                AMQPFrame::Method(0, AMQPClass::Connection(AMQPMethod::Tune(tune))) => {
+                AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Tune(tune))) => {
                     debug!("received handshake {:?}", tune);
 
                     let tune_ok = inner.options.make_tune_ok(tune)?;
@@ -96,11 +101,11 @@ impl ConnectionState {
                     };
 
                     debug!("sending handshake {:?}", tune_ok);
-                    inner.push_method(0, AMQPMethod::TuneOk(tune_ok))?;
+                    inner.push_method(0, AmqpConnection::TuneOk(tune_ok))?;
 
                     let open = inner.options.make_open();
                     debug!("sending handshake {:?}", open);
-                    inner.push_method(0, AMQPMethod::Open(open))?;
+                    inner.push_method(0, AmqpConnection::Open(open))?;
 
                     inner.connection_parameters = Some(conn_params);
                     *self = ConnectionState::Open;
@@ -109,19 +114,19 @@ impl ConnectionState {
                 _ => Err(ErrorKind::HandshakeWrongServerFrame("tune", frame))?,
             },
             ConnectionState::Open => match frame {
-                AMQPFrame::Method(0, AMQPClass::Connection(AMQPMethod::OpenOk(open_ok))) => {
+                AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::OpenOk(open_ok))) => {
                     debug!("received handshake {:?}", open_ok);
                     *self = ConnectionState::Steady;
                     Ok(())
                 }
-                AMQPFrame::Method(0, AMQPClass::Connection(AMQPMethod::Close(close))) => {
+                AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
                     inner.set_server_close_req(close)?;
                     Ok(())
                 }
                 _ => Err(ErrorKind::HandshakeWrongServerFrame("open-ok", frame))?,
             },
             ConnectionState::Closing(close) => match frame {
-                AMQPFrame::Method(0, AMQPClass::Connection(AMQPMethod::CloseOk(_))) => Err(
+                AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::CloseOk(_))) => Err(
                     ErrorKind::ClientClosedConnection(close.reply_code, close.reply_text.clone()),
                 )?,
                 _ => {
@@ -130,9 +135,46 @@ impl ConnectionState {
                 }
             },
             ConnectionState::Steady => match frame {
-                AMQPFrame::Method(0, AMQPClass::Connection(AMQPMethod::Close(close))) => {
+                AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
                     inner.set_server_close_req(close)?;
                     Ok(())
+                }
+                AMQPFrame::Method(0, other) => {
+                    let text = format!("do not know how to handle channel 0 method {:?}", other);
+                    error!("{} - closing connection", text);
+                    Ok(inner.set_our_close_req(Close {
+                        reply_code: AMQPHardError::NOTIMPLEMENTED.get_id(),
+                        reply_text: text,
+                        class_id: 0,
+                        method_id: 0,
+                    })?)
+                }
+                AMQPFrame::Method(
+                    channel_id,
+                    AMQPClass::Channel(AmqpChannel::CloseOk(close_ok)),
+                ) => {
+                    let mut channels = inner.channels.lock().unwrap();
+                    // if we're getting close-ok, send it to the channel handle, then
+                    // remove that handle from our hashmap.
+                    match channels.entry(channel_id) {
+                        Entry::Occupied(entry) => {
+                            let result = entry
+                                .get()
+                                .send_rpc(AMQPClass::Channel(AmqpChannel::CloseOk(close_ok)));
+                            trace!("removing handle for channel {}", channel_id);
+                            entry.remove();
+                            result
+                        }
+                        Entry::Vacant(_) => Err(ErrorKind::ChannelDropped(channel_id))?,
+                    }
+                }
+                AMQPFrame::Method(channel_id, method) => {
+                    let channels = inner.channels.lock().unwrap();
+                    if let Some(handle) = channels.get(&channel_id) {
+                        handle.send_rpc(method)
+                    } else {
+                        Err(ErrorKind::ChannelDropped(channel_id))?
+                    }
                 }
                 other => {
                     let text = format!("do not know how to handle frame {:?}", other);
@@ -235,17 +277,32 @@ struct Inner<Auth: Sasl> {
 
     options: ConnectionOptions<Auth>,
     heartbeats: HeartbeatTimers,
+
+    channels: Arc<Mutex<HashMap<u16, ChannelHandle>>>,
+}
+
+impl<Auth: Sasl> Drop for Inner<Auth> {
+    fn drop(&mut self) {
+        // drop all the ChannelHandles since we will never send to them again
+        let mut channels = self.channels.lock().unwrap();
+        channels.clear();
+    }
 }
 
 impl<Auth: Sasl> Inner<Auth> {
-    fn new(options: ConnectionOptions<Auth>, heartbeats: HeartbeatTimers) -> Self {
+    fn new(
+        options: ConnectionOptions<Auth>,
+        heartbeats: HeartbeatTimers,
+        channels: Arc<Mutex<HashMap<u16, ChannelHandle>>>,
+    ) -> Self {
         Inner {
-            outbuf: OutputBuffer::new(),
+            outbuf: OutputBuffer::with_protocol_header(),
             connection_parameters: None,
             server_close_req: None,
             our_close_req: None,
             options,
             heartbeats,
+            channels,
         }
     }
 
@@ -264,7 +321,7 @@ impl<Auth: Sasl> Inner<Auth> {
             return Ok(());
         }
         self.outbuf
-            .push_method(0, AMQPMethod::CloseOk(CloseOk {}))?;
+            .push_method(0, AmqpConnection::CloseOk(CloseOk {}))?;
         self.server_close_req = Some(CloseRequest {
             close,
             pos: self.outbuf.len(),
@@ -283,6 +340,11 @@ impl<Auth: Sasl> Inner<Auth> {
     #[inline]
     fn push_method<M: IntoAmqpClass>(&mut self, channel_id: u16, method: M) -> Result<()> {
         self.outbuf.push_method(channel_id, method)
+    }
+
+    #[inline]
+    fn push_buffer(&mut self, buffer: OutputBuffer) {
+        self.outbuf.append(buffer)
     }
 
     #[inline]
@@ -317,7 +379,7 @@ impl<Auth: Sasl> Inner<Auth> {
             return Ok(());
         }
         self.outbuf
-            .push_method(0, AMQPMethod::Close(close.clone()))?;
+            .push_method(0, AmqpConnection::Close(close.clone()))?;
         self.our_close_req = Some(CloseRequest {
             close,
             pos: self.outbuf.len(),
@@ -437,9 +499,48 @@ impl<Auth: Sasl> Inner<Auth> {
 
 pub enum Command {
     Close,
+    Send(OutputBuffer),
 }
 
-pub struct EventLoop<Auth: Sasl> {
+#[derive(Clone)]
+pub struct EventLoopHandle {
+    command_tx: MioSyncSender<Command>,
+    event_loop_result: Arc<Mutex<Option<Result<()>>>>,
+}
+
+impl EventLoopHandle {
+    pub fn close_connection(&self) -> Result<()> {
+        self.send_command(Command::Close)
+    }
+
+    pub fn call<M: IntoAmqpClass, T: TryFromAmqpClass>(
+        &self,
+        channel_id: u16,
+        method: M,
+        rx: &Receiver<AMQPClass>,
+    ) -> Result<T> {
+        let buf = OutputBuffer::with_method(channel_id, method)?;
+        self.send_command(Command::Send(buf))?;
+        let response = self.map_channel_error(rx.recv())?;
+        T::try_from(response)
+    }
+
+    fn send_command(&self, command: Command) -> Result<()> {
+        self.map_channel_error(self.command_tx.send(command))
+    }
+
+    fn map_channel_error<T, E>(&self, result: StdResult<T, E>) -> Result<T> {
+        result.map_err(|_| {
+            let result = self.event_loop_result.lock().unwrap();
+            match &*result {
+                Some(Ok(())) | None => ErrorKind::EventLoopDropped.into(),
+                Some(Err(err)) => err.clone(),
+            }
+        })
+    }
+}
+
+pub(crate) struct EventLoop<Auth: Sasl> {
     stream: TcpStream,
     poll: Poll,
     frame_buffer: FrameBuffer,
@@ -453,8 +554,8 @@ impl<Auth: Sasl> EventLoop<Auth> {
     pub fn new(
         options: ConnectionOptions<Auth>,
         stream: TcpStream,
-        command_buffer_size: Option<usize>,
-    ) -> Result<(Self, MioSyncSender<Command>)> {
+        channels: Arc<Mutex<HashMap<u16, ChannelHandle>>>,
+    ) -> Result<(Self, EventLoopHandle)> {
         let heartbeats = HeartbeatTimers::default();
 
         let poll = Poll::new().context(ErrorKind::Io)?;
@@ -473,10 +574,7 @@ impl<Auth: Sasl> EventLoop<Auth> {
         )
         .context(ErrorKind::Io)?;
 
-        // TODO What is a reasonable default size? If this is too large can clients
-        // force us to be stuck sending and never receiving? (If this is 1 can that
-        // happen?)
-        let (command_tx, command_rx) = mio_sync_channel(command_buffer_size.unwrap_or(1));
+        let (command_tx, command_rx) = mio_sync_channel(options.io_thread_channel_bound);
         poll.register(&command_rx, COMMAND, Ready::readable(), PollOpt::edge())
             .context(ErrorKind::Io)?;
 
@@ -488,11 +586,14 @@ impl<Auth: Sasl> EventLoop<Auth> {
                 poll,
                 frame_buffer: FrameBuffer::new(),
                 command_rx,
-                inner: Inner::new(options, heartbeats),
+                inner: Inner::new(options, heartbeats, channels),
                 state: ConnectionState::Start,
                 result: Arc::clone(&result),
             },
-            command_tx,
+            EventLoopHandle {
+                command_tx,
+                event_loop_result: result,
+            },
         ))
     }
 
@@ -619,6 +720,9 @@ impl<Auth: Sasl> EventLoop<Auth> {
                         class_id: 0,
                         method_id: 0,
                     })?;
+                }
+                Command::Send(buf) => {
+                    self.inner.push_buffer(buf);
                 }
             }
         }
