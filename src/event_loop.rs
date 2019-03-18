@@ -2,11 +2,12 @@ use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::heartbeats::{Heartbeat, HeartbeatState};
-use crate::serialize::{OutputBuffer, IntoAmqpClass};
+use crate::serialize::{IntoAmqpClass, OutputBuffer};
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::{AMQPMethod, Close, CloseOk};
 use amq_protocol::protocol::{AMQPClass, AMQPHardError};
+use crossbeam_channel::Sender;
 use failure::{Fail, ResultExt};
 use log::{debug, error, info, trace, warn};
 use mio::net::TcpStream;
@@ -19,6 +20,12 @@ const MAX_MISSED_SERVER_HEARTBEATS: u32 = 2;
 
 const STREAM: Token = Token(0);
 const HEARTBEAT: Token = Token(1);
+
+#[derive(Debug, Clone, Copy)]
+pub struct ConnectionParameters {
+    channel_max: u16,
+    frame_max: u32,
+}
 
 #[derive(Debug)]
 enum ConnectionState {
@@ -73,6 +80,10 @@ impl ConnectionState {
 
                     let tune_ok = inner.options.make_tune_ok(tune)?;
                     inner.start_heartbeats(tune_ok.heartbeat);
+                    let conn_params = ConnectionParameters {
+                        channel_max: tune_ok.channel_max,
+                        frame_max: tune_ok.frame_max,
+                    };
 
                     debug!("sending handshake {:?}", tune_ok);
                     inner.push_method(0, AMQPMethod::TuneOk(tune_ok))?;
@@ -81,6 +92,7 @@ impl ConnectionState {
                     debug!("sending handshake {:?}", open);
                     inner.push_method(0, AMQPMethod::Open(open))?;
 
+                    inner.connection_parameters = Some(conn_params);
                     *self = ConnectionState::Open;
                     Ok(())
                 }
@@ -198,6 +210,9 @@ struct Inner<Auth: Sasl> {
     // Buffer of data waiting to be written.
     outbuf: OutputBuffer,
 
+    // Place to stash ConnectionParameters so we can report back to the caller
+    connection_parameters: Option<ConnectionParameters>,
+
     // If we're going to send a CloseOk, we should close the connection immediately afterwards. If
     // server_close_req is Some, then we should close the connection after writing
     // outbuf[..server_close_req.pos]. server_close_req.pos may be larger than the size of a CloseOk frame
@@ -216,6 +231,7 @@ impl<Auth: Sasl> Inner<Auth> {
     fn new(options: ConnectionOptions<Auth>, heartbeats: HeartbeatTimers) -> Self {
         Inner {
             outbuf: OutputBuffer::new(),
+            connection_parameters: None,
             server_close_req: None,
             our_close_req: None,
             options,
@@ -237,7 +253,8 @@ impl<Auth: Sasl> Inner<Auth> {
         if self.server_close_req.is_some() {
             return Ok(());
         }
-        self.outbuf.push_method(0, AMQPMethod::CloseOk(CloseOk {}))?;
+        self.outbuf
+            .push_method(0, AMQPMethod::CloseOk(CloseOk {}))?;
         self.server_close_req = Some(CloseRequest {
             close,
             pos: self.outbuf.len(),
@@ -289,7 +306,8 @@ impl<Auth: Sasl> Inner<Auth> {
         if self.our_close_req.is_some() {
             return Ok(());
         }
-        self.outbuf.push_method(0, AMQPMethod::Close(close.clone()))?;
+        self.outbuf
+            .push_method(0, AMQPMethod::Close(close.clone()))?;
         self.our_close_req = Some(CloseRequest {
             close,
             pos: self.outbuf.len(),
@@ -444,22 +462,20 @@ impl<Auth: Sasl> EventLoop<Auth> {
         })
     }
 
-    pub fn run(&mut self) -> Result<()> {
-        match self.main_loop() {
+    pub fn run(&mut self, tune_params: Sender<ConnectionParameters>) -> Result<()> {
+        match self.main_loop(Some(tune_params)) {
             Ok(()) => Ok(()),
             Err(err) => match self.state {
                 // if we send bad credentials, the socket gets dropped without
                 // a close message, but we can tell clients it was an auth problem
                 // if we had made it to that step in the handshake.
-                ConnectionState::Secure => {
-                    Err(err.context(ErrorKind::InvalidCredentials))?
-                },
+                ConnectionState::Secure => Err(err.context(ErrorKind::InvalidCredentials))?,
                 _ => Err(err),
-            }
+            },
         }
     }
 
-    fn main_loop(&mut self) -> Result<()> {
+    fn main_loop(&mut self, mut tune_params: Option<Sender<ConnectionParameters>>) -> Result<()> {
         let mut events = Events::with_capacity(128);
         loop {
             self.poll
@@ -489,6 +505,19 @@ impl<Auth: Sasl> EventLoop<Auth> {
                     HEARTBEAT => self.inner.process_heartbeat_timers()?,
                     _ => unreachable!(),
                 }
+            }
+
+            // see if we've progressed to the tune-ok part of the handshake; if so,
+            // pull those params out and send them back to our caller so they know
+            // how many channels and how to chunk frames
+            if let Some(connection_parameters) = self.inner.connection_parameters.take() {
+                // unwrapping this is safe - we're only called with Some() from run, and
+                // connection_parameters is only filled in exactly once (during the handshake
+                // process).
+                let tune_params = tune_params.take().unwrap();
+                tune_params
+                    .send(connection_parameters)
+                    .context(ErrorKind::EventLoopClientDropped)?;
             }
 
             let have_data_to_write = self.inner.has_data_to_write();
