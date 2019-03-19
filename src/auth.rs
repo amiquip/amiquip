@@ -1,4 +1,4 @@
-pub trait Sasl: Default {
+pub trait Sasl: Default + Send + 'static {
     fn mechanism(&self) -> String;
     fn response(&self) -> String;
 }

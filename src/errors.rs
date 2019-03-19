@@ -1,9 +1,13 @@
 use amq_protocol::frame::AMQPFrame;
 use failure::{Backtrace, Context, Fail};
+use std::sync::Arc;
 use std::{fmt, result};
 
 /// A type alias for handling errors throughout amiquip.
-pub type Result<T> = result::Result<T, Error>;
+pub type Result<T> = result::Result<T, ArcError>;
+
+#[derive(Debug, Clone)]
+pub struct ArcError(pub Arc<Error>);
 
 /// An error that can occur from amiquip.
 #[derive(Debug)]
@@ -11,25 +15,25 @@ pub struct Error {
     ctx: Context<ErrorKind>,
 }
 
-impl Error {
+impl ArcError {
     pub fn kind(&self) -> &ErrorKind {
-        self.ctx.get_context()
+        self.0.ctx.get_context()
     }
 }
 
-impl Fail for Error {
+impl Fail for ArcError {
     fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
+        self.0.ctx.cause()
     }
 
     fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
+        self.0.ctx.backtrace()
     }
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for ArcError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
+        self.0.ctx.fmt(f)
     }
 }
 
@@ -84,19 +88,28 @@ pub enum ErrorKind {
     #[fail(display = "event loop thread tried to communicate with a nonexistent client")]
     EventLoopClientDropped,
 
+    #[fail(display = "event loop thread died (no further information available)")]
+    EventLoopDropped,
+
     #[doc(hidden)]
     #[fail(display = "invalid error case")]
     __Nonexhaustive,
 }
 
-impl From<ErrorKind> for Error {
-    fn from(kind: ErrorKind) -> Error {
-        Error::from(Context::new(kind))
+impl From<ErrorKind> for ArcError {
+    fn from(kind: ErrorKind) -> ArcError {
+        ArcError(Arc::new(Error::from(Context::new(kind))))
     }
 }
 
 impl From<Context<ErrorKind>> for Error {
     fn from(ctx: Context<ErrorKind>) -> Error {
         Error { ctx }
+    }
+}
+
+impl From<Context<ErrorKind>> for ArcError {
+    fn from(ctx: Context<ErrorKind>) -> ArcError {
+        ArcError(Arc::new(Error { ctx }))
     }
 }

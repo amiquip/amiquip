@@ -19,6 +19,7 @@ use mio_extras::channel::SyncSender as MioSyncSender;
 use mio_extras::timer::Timer;
 use std::io;
 use std::sync::mpsc::TryRecvError;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const MAX_MISSED_SERVER_HEARTBEATS: u32 = 2;
@@ -445,6 +446,7 @@ pub struct EventLoop<Auth: Sasl> {
     command_rx: MioReceiver<Command>,
     inner: Inner<Auth>,
     state: ConnectionState,
+    result: Arc<Mutex<Option<Result<()>>>>,
 }
 
 impl<Auth: Sasl> EventLoop<Auth> {
@@ -478,6 +480,8 @@ impl<Auth: Sasl> EventLoop<Auth> {
         poll.register(&command_rx, COMMAND, Ready::readable(), PollOpt::edge())
             .context(ErrorKind::Io)?;
 
+        let result = Arc::default();
+
         Ok((
             EventLoop {
                 stream,
@@ -486,13 +490,31 @@ impl<Auth: Sasl> EventLoop<Auth> {
                 command_rx,
                 inner: Inner::new(options, heartbeats),
                 state: ConnectionState::Start,
+                result: Arc::clone(&result),
             },
             command_tx,
         ))
     }
 
-    pub fn run(&mut self, tune_params: Sender<ConnectionParameters>) -> Result<()> {
-        let err = match self.main_loop(Some(tune_params)) {
+    pub fn run(mut self, tune_params: Sender<ConnectionParameters>) -> Result<()> {
+        let final_result = self.main_loop(Some(tune_params));
+        let final_result = self.remap_main_loop_result(final_result);
+
+        {
+            let mut result = self.result.lock().unwrap();
+            assert!(
+                result.is_none(),
+                "someone else filled in event loop final result"
+            );
+            *result = Some(final_result.clone());
+        }
+
+        final_result
+    }
+
+    // some error returns from main_loop aren't quite right; fix them up here.
+    fn remap_main_loop_result(&self, result: Result<()>) -> Result<()> {
+        let err = match result {
             Ok(()) => return Ok(()),
             Err(err) => err,
         };
@@ -506,7 +528,7 @@ impl<Auth: Sasl> EventLoop<Auth> {
         match self.state {
             // if we send bad credentials, the socket gets dropped without
             // a close message, but we can tell clients it was an auth problem
-            // if we had made it to that step in the handshake.
+            // if we had made it to that step in the handshake (and no further).
             ConnectionState::Secure => Err(err.context(ErrorKind::InvalidCredentials))?,
             _ => Err(err),
         }

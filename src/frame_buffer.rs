@@ -136,7 +136,7 @@ impl<Kind: FrameKind> Inner<Kind> {
 #[cfg(test)]
 mod tests {
     use super::{ErrorKind, FrameKind, Inner, Result};
-    use crate::Error;
+    use crate::errors::ArcError;
     use mockstream::FailingMockStream;
     use std::io::{self, Cursor, Read};
 
@@ -279,7 +279,7 @@ mod tests {
 
         // use __Nonexhaustive as "some non-parsing, non-I/O error"
         let mut buf = make_buffer();
-        let res = buf.read_from(&mut c, |_| Err(Error::from(ErrorKind::__Nonexhaustive)));
+        let res = buf.read_from(&mut c, |_| Err(ArcError::from(ErrorKind::__Nonexhaustive)));
         assert!(res.is_err());
         assert_eq!(*res.unwrap_err().kind(), ErrorKind::__Nonexhaustive);
     }
