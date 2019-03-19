@@ -6,20 +6,29 @@ use crate::serialize::{IntoAmqpClass, OutputBuffer};
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::{AMQPMethod, Close, CloseOk};
+use amq_protocol::protocol::constants::REPLY_SUCCESS as AMQP_REPLY_SUCCESS;
 use amq_protocol::protocol::{AMQPClass, AMQPHardError};
 use crossbeam_channel::Sender;
 use failure::{Fail, ResultExt};
 use log::{debug, error, info, trace, warn};
 use mio::net::TcpStream;
 use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio_extras::channel::sync_channel as mio_sync_channel;
+use mio_extras::channel::Receiver as MioReceiver;
+use mio_extras::channel::SyncSender as MioSyncSender;
 use mio_extras::timer::Timer;
 use std::io;
+use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
 const MAX_MISSED_SERVER_HEARTBEATS: u32 = 2;
 
+// AMQP_REPLY_SUCCESS is a u8, but we need a u16 where we use it.
+const REPLY_SUCCESS: u16 = AMQP_REPLY_SUCCESS as u16;
+
 const STREAM: Token = Token(0);
 const HEARTBEAT: Token = Token(1);
+const COMMAND: Token = Token(2);
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionParameters {
@@ -425,16 +434,25 @@ impl<Auth: Sasl> Inner<Auth> {
     }
 }
 
+pub enum Command {
+    Close,
+}
+
 pub struct EventLoop<Auth: Sasl> {
     stream: TcpStream,
     poll: Poll,
     frame_buffer: FrameBuffer,
+    command_rx: MioReceiver<Command>,
     inner: Inner<Auth>,
     state: ConnectionState,
 }
 
 impl<Auth: Sasl> EventLoop<Auth> {
-    pub fn new(options: ConnectionOptions<Auth>, stream: TcpStream) -> Result<Self> {
+    pub fn new(
+        options: ConnectionOptions<Auth>,
+        stream: TcpStream,
+        command_buffer_size: Option<usize>,
+    ) -> Result<(Self, MioSyncSender<Command>)> {
         let heartbeats = HeartbeatTimers::default();
 
         let poll = Poll::new().context(ErrorKind::Io)?;
@@ -453,25 +471,44 @@ impl<Auth: Sasl> EventLoop<Auth> {
         )
         .context(ErrorKind::Io)?;
 
-        Ok(EventLoop {
-            stream,
-            poll,
-            frame_buffer: FrameBuffer::new(),
-            inner: Inner::new(options, heartbeats),
-            state: ConnectionState::Start,
-        })
+        // TODO What is a reasonable default size? If this is too large can clients
+        // force us to be stuck sending and never receiving? (If this is 1 can that
+        // happen?)
+        let (command_tx, command_rx) = mio_sync_channel(command_buffer_size.unwrap_or(1));
+        poll.register(&command_rx, COMMAND, Ready::readable(), PollOpt::edge())
+            .context(ErrorKind::Io)?;
+
+        Ok((
+            EventLoop {
+                stream,
+                poll,
+                frame_buffer: FrameBuffer::new(),
+                command_rx,
+                inner: Inner::new(options, heartbeats),
+                state: ConnectionState::Start,
+            },
+            command_tx,
+        ))
     }
 
     pub fn run(&mut self, tune_params: Sender<ConnectionParameters>) -> Result<()> {
-        match self.main_loop(Some(tune_params)) {
-            Ok(()) => Ok(()),
-            Err(err) => match self.state {
-                // if we send bad credentials, the socket gets dropped without
-                // a close message, but we can tell clients it was an auth problem
-                // if we had made it to that step in the handshake.
-                ConnectionState::Secure => Err(err.context(ErrorKind::InvalidCredentials))?,
-                _ => Err(err),
-            },
+        let err = match self.main_loop(Some(tune_params)) {
+            Ok(()) => return Ok(()),
+            Err(err) => err,
+        };
+
+        match *err.kind() {
+            // If we closed at the client's request, replace the error with Ok.
+            ErrorKind::ClientClosedConnection(code, _) if code == REPLY_SUCCESS => return Ok(()),
+            _ => (),
+        }
+
+        match self.state {
+            // if we send bad credentials, the socket gets dropped without
+            // a close message, but we can tell clients it was an auth problem
+            // if we had made it to that step in the handshake.
+            ConnectionState::Secure => Err(err.context(ErrorKind::InvalidCredentials))?,
+            _ => Err(err),
         }
     }
 
@@ -503,6 +540,7 @@ impl<Auth: Sasl> EventLoop<Auth> {
                         }
                     }
                     HEARTBEAT => self.inner.process_heartbeat_timers()?,
+                    COMMAND => self.process_commands()?,
                     _ => unreachable!(),
                 }
             }
@@ -540,6 +578,26 @@ impl<Auth: Sasl> EventLoop<Auth> {
                         PollOpt::edge(),
                     )
                     .context(ErrorKind::Io)?;
+            }
+        }
+    }
+
+    fn process_commands(&mut self) -> Result<()> {
+        loop {
+            let command = match self.command_rx.try_recv() {
+                Ok(command) => command,
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
+            };
+            match command {
+                Command::Close => {
+                    self.inner.set_our_close_req(Close {
+                        reply_code: REPLY_SUCCESS,
+                        reply_text: "goodbye".to_string(),
+                        class_id: 0,
+                        method_id: 0,
+                    })?;
+                }
             }
         }
     }
