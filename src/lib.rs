@@ -15,6 +15,8 @@ pub use connection_options::ConnectionOptions;
 pub use connection::Connection;
 pub use errors::{Error, ErrorKind, Result};
 
+pub use amq_protocol::protocol::basic::AMQPProperties as AmqpProperties;
+
 #[allow(dead_code)]
 mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));

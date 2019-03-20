@@ -6,6 +6,7 @@ use crate::heartbeats::{Heartbeat, HeartbeatState};
 use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass};
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
+use amq_protocol::protocol::basic::AMQPProperties;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::{Close, CloseOk};
@@ -523,6 +524,31 @@ impl EventLoopHandle {
         self.send_command(Command::Send(buf))?;
         let response = self.map_channel_error(rx.recv())?;
         T::try_from(response)
+    }
+
+    pub fn call_nowait<M: IntoAmqpClass>(&self, channel_id: u16, method: M) -> Result<()> {
+        let buf = OutputBuffer::with_method(channel_id, method)?;
+        self.send_command(Command::Send(buf))
+    }
+
+    pub fn send_content_header(
+        &self,
+        channel_id: u16,
+        class_id: u16,
+        length: usize,
+        properties: &AMQPProperties,
+    ) -> Result<()> {
+        let buf = OutputBuffer::with_content_header(channel_id, class_id, length, properties)?;
+        self.send_command(Command::Send(buf))
+    }
+
+    pub fn send_content_body(
+        &self,
+        channel_id: u16,
+        content: &[u8],
+    ) -> Result<()> {
+        let buf = OutputBuffer::with_content_body(channel_id, content)?;
+        self.send_command(Command::Send(buf))
     }
 
     fn send_command(&self, command: Command) -> Result<()> {

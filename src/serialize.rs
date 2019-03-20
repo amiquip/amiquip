@@ -1,6 +1,9 @@
 use crate::{ErrorKind, Result};
-use amq_protocol::frame::generation::{gen_heartbeat_frame, gen_method_frame};
+use amq_protocol::frame::generation::{
+    gen_content_body_frame, gen_content_header_frame, gen_heartbeat_frame, gen_method_frame,
+};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
+use amq_protocol::protocol::basic::AMQPProperties;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::AMQPClass;
@@ -70,6 +73,28 @@ impl OutputBuffer {
     {
         let mut buf = OutputBuffer::empty();
         buf.push_method(channel_id, method)?;
+        Ok(buf)
+    }
+
+    pub fn with_content_header(
+        channel_id: u16,
+        class_id: u16,
+        length: usize,
+        properties: &AMQPProperties,
+    ) -> Result<OutputBuffer> {
+        let length = length as u64;
+        let mut buf = OutputBuffer::empty();
+        serialize(&mut buf.0, |buf, pos| {
+            gen_content_header_frame((buf, pos), channel_id, class_id, length, properties)
+        })?;
+        Ok(buf)
+    }
+
+    pub fn with_content_body(channel_id: u16, content: &[u8]) -> Result<OutputBuffer> {
+        let mut buf = OutputBuffer::empty();
+        serialize(&mut buf.0, |buf, pos| {
+            gen_content_body_frame((buf, pos), channel_id, content)
+        })?;
         Ok(buf)
     }
 
