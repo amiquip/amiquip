@@ -83,19 +83,12 @@ impl Channel {
             }),
         )?;
 
-        let mut content = content.as_ref();
-        self.loop_handle.send_content_header(
+        self.loop_handle.send_content(
             self.id,
+            content.as_ref(),
             Publish::get_class_id(),
-            content.len(),
             properties,
-        )?;
-        while content.len() > 4088 {
-            self.loop_handle
-                .send_content_body(self.id, &content[..4088])?;
-            content = &content[4088..];
-        }
-        self.loop_handle.send_content_body(self.id, content)
+        )
     }
 
     fn close_and_wait(&mut self) -> Result<()> {

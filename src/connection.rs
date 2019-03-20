@@ -1,7 +1,7 @@
 use crate::auth::Sasl;
 use crate::channel::{Channel, ChannelHandle};
 use crate::connection_options::ConnectionOptions;
-use crate::event_loop::{ConnectionParameters, EventLoop, EventLoopHandle};
+use crate::event_loop::{EventLoop, EventLoopHandle};
 use crate::{ErrorKind, Result};
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::channel::OpenOk;
@@ -17,7 +17,7 @@ pub struct Connection {
     loop_handle: EventLoopHandle,
     event_loop_thread: Option<JoinHandle<Result<()>>>,
     channels: Arc<Mutex<HashMap<u16, ChannelHandle>>>,
-    conn_params: ConnectionParameters,
+    channel_max: u16,
     closed: bool,
 }
 
@@ -33,16 +33,16 @@ impl Connection {
         options: ConnectionOptions<Auth>,
     ) -> Result<Connection> {
         let channels = Arc::default();
-        let (event_loop, loop_handle) = EventLoop::new(options, stream, Arc::clone(&channels))?;
-        let (tune_tx, tune_rx) = bounded(1);
+        let event_loop = EventLoop::new(options, stream, Arc::clone(&channels))?;
+        let (setup_tx, setup_rx) = bounded(1);
 
         let event_loop_thread = Builder::new()
             .name("amiquip-io".to_string())
-            .spawn(move || event_loop.run(tune_tx))
+            .spawn(move || event_loop.run(setup_tx))
             .context(ErrorKind::ForkFailed)?;
 
-        let conn_params = match tune_rx.recv() {
-            Ok(params) => params,
+        let (channel_max, loop_handle) = match setup_rx.recv() {
+            Ok((channel_max, loop_handle)) => (channel_max, loop_handle),
             Err(_) => {
                 // TODO get rid of this unwrap
                 let res = event_loop_thread.join().unwrap();
@@ -55,7 +55,7 @@ impl Connection {
             loop_handle,
             event_loop_thread: Some(event_loop_thread),
             channels,
-            conn_params,
+            channel_max,
             closed: false,
         })
     }

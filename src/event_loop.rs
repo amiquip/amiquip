@@ -38,7 +38,7 @@ const HEARTBEAT: Token = Token(1);
 const COMMAND: Token = Token(2);
 
 #[derive(Debug, Clone, Copy)]
-pub struct ConnectionParameters {
+struct ConnectionParameters {
     channel_max: u16,
     frame_max: u32,
 }
@@ -507,6 +507,7 @@ pub enum Command {
 pub struct EventLoopHandle {
     command_tx: MioSyncSender<Command>,
     event_loop_result: Arc<Mutex<Option<Result<()>>>>,
+    frame_max: usize,
 }
 
 impl EventLoopHandle {
@@ -531,22 +532,38 @@ impl EventLoopHandle {
         self.send_command(Command::Send(buf))
     }
 
-    pub fn send_content_header(
+    pub fn send_content(
         &self,
         channel_id: u16,
+        mut content: &[u8],
         class_id: u16,
-        length: usize,
         properties: &AMQPProperties,
     ) -> Result<()> {
-        let buf = OutputBuffer::with_content_header(channel_id, class_id, length, properties)?;
-        self.send_command(Command::Send(buf))
-    }
+        trace!(
+            "sending content header on channel {} (class_id = {}, len = {})",
+            channel_id,
+            class_id,
+            content.len()
+        );
+        let buf =
+            OutputBuffer::with_content_header(channel_id, class_id, content.len(), properties)?;
+        self.send_command(Command::Send(buf))?;
 
-    pub fn send_content_body(
-        &self,
-        channel_id: u16,
-        content: &[u8],
-    ) -> Result<()> {
+        while content.len() > self.frame_max {
+            trace!(
+                "sending partial content body frame on channel {} (len = {})",
+                channel_id,
+                self.frame_max
+            );
+            let buf = OutputBuffer::with_content_body(channel_id, &content[..self.frame_max])?;
+            self.send_command(Command::Send(buf))?;
+            content = &content[self.frame_max..];
+        }
+        trace!(
+            "sending final content body frame on channel {} (len = {})",
+            channel_id,
+            content.len()
+        );
         let buf = OutputBuffer::with_content_body(channel_id, content)?;
         self.send_command(Command::Send(buf))
     }
@@ -574,6 +591,10 @@ pub(crate) struct EventLoop<Auth: Sasl> {
     inner: Inner<Auth>,
     state: ConnectionState,
     result: Arc<Mutex<Option<Result<()>>>>,
+
+    // This is an option because we hold it only long enough to perform the handshake,
+    // then move it into an EventLoopHandle.
+    command_tx: Option<MioSyncSender<Command>>,
 }
 
 impl<Auth: Sasl> EventLoop<Auth> {
@@ -581,7 +602,7 @@ impl<Auth: Sasl> EventLoop<Auth> {
         options: ConnectionOptions<Auth>,
         stream: TcpStream,
         channels: Arc<Mutex<HashMap<u16, ChannelHandle>>>,
-    ) -> Result<(Self, EventLoopHandle)> {
+    ) -> Result<Self> {
         let heartbeats = HeartbeatTimers::default();
 
         let poll = Poll::new().context(ErrorKind::Io)?;
@@ -606,25 +627,20 @@ impl<Auth: Sasl> EventLoop<Auth> {
 
         let result = Arc::default();
 
-        Ok((
-            EventLoop {
-                stream,
-                poll,
-                frame_buffer: FrameBuffer::new(),
-                command_rx,
-                inner: Inner::new(options, heartbeats, channels),
-                state: ConnectionState::Start,
-                result: Arc::clone(&result),
-            },
-            EventLoopHandle {
-                command_tx,
-                event_loop_result: result,
-            },
-        ))
+        Ok(EventLoop {
+            stream,
+            poll,
+            frame_buffer: FrameBuffer::new(),
+            command_rx,
+            inner: Inner::new(options, heartbeats, channels),
+            state: ConnectionState::Start,
+            result: result,
+            command_tx: Some(command_tx),
+        })
     }
 
-    pub fn run(mut self, tune_params: Sender<ConnectionParameters>) -> Result<()> {
-        let final_result = self.main_loop(Some(tune_params));
+    pub fn run(mut self, setup_done: Sender<(u16, EventLoopHandle)>) -> Result<()> {
+        let final_result = self.main_loop(Some(setup_done));
         let final_result = self.remap_main_loop_result(final_result);
 
         {
@@ -661,7 +677,9 @@ impl<Auth: Sasl> EventLoop<Auth> {
         }
     }
 
-    fn main_loop(&mut self, mut tune_params: Option<Sender<ConnectionParameters>>) -> Result<()> {
+    // Sends (channel-max, handle) back on the setup_done channel (which must be Some(..))
+    // and then drops it.
+    fn main_loop(&mut self, mut setup_done: Option<Sender<(u16, EventLoopHandle)>>) -> Result<()> {
         let mut events = Events::with_capacity(128);
         loop {
             self.poll
@@ -698,12 +716,18 @@ impl<Auth: Sasl> EventLoop<Auth> {
             // pull those params out and send them back to our caller so they know
             // how many channels and how to chunk frames
             if let Some(connection_parameters) = self.inner.connection_parameters.take() {
-                // unwrapping this is safe - we're only called with Some() from run, and
+                // unwrapping these are safe - we're only called with Some() from run, and
                 // connection_parameters is only filled in exactly once (during the handshake
-                // process).
-                let tune_params = tune_params.take().unwrap();
-                tune_params
-                    .send(connection_parameters)
+                // process), which gives us the one shot to steal command_tx and move it
+                // into the handle.
+                let setup_done = setup_done.take().unwrap();
+                let handle = EventLoopHandle {
+                    command_tx: self.command_tx.take().unwrap(),
+                    event_loop_result: Arc::clone(&self.result),
+                    frame_max: connection_parameters.frame_max as usize,
+                };
+                setup_done
+                    .send((connection_parameters.channel_max, handle))
                     .context(ErrorKind::EventLoopClientDropped)?;
             }
 
