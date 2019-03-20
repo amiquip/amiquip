@@ -8,6 +8,7 @@ use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPProperties;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
+use amq_protocol::protocol::channel::CloseOk as ChannelCloseOk;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::{Close, CloseOk};
 use amq_protocol::protocol::constants::REPLY_SUCCESS as AMQP_REPLY_SUCCESS;
@@ -136,10 +137,12 @@ impl ConnectionState {
                 }
             },
             ConnectionState::Steady => match frame {
+                // server-initiated close
                 AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
                     inner.set_server_close_req(close)?;
                     Ok(())
                 }
+                // TODO handle other expected channel 0 methods
                 AMQPFrame::Method(0, other) => {
                     let text = format!("do not know how to handle channel 0 method {:?}", other);
                     error!("{} - closing connection", text);
@@ -150,14 +153,31 @@ impl ConnectionState {
                         method_id: 0,
                     })?)
                 }
+                // server-initiated channel close
+                AMQPFrame::Method(channel_id, AMQPClass::Channel(AmqpChannel::Close(close))) => {
+                    debug!("server closing channel - {:?}", close);
+                    match inner.channels.lock().unwrap().entry(channel_id) {
+                        Entry::Occupied(entry) => entry.get().set_server_closed(close),
+                        Entry::Vacant(_) => {
+                            warn!("received channel close request for a channel we don't know about - {:?}", close);
+                        }
+                    }
+                    // TODO FIX RACE CONDITION - if we enqueue close-ok here but the channel
+                    // is currently sending us a Send(Buf) command, we'll end up sending that
+                    // after the CloseOk, resultign in the server killing our connection for
+                    // sending an invalid message on a closed channel. Probably need to switch
+                    // away from just getting dumb buffers, or need to change to having a
+                    // MioChannel for each AMQP channel?
+                    inner.push_method(channel_id, AmqpChannel::CloseOk(ChannelCloseOk {}))
+                }
+                // server response to our channel close request
                 AMQPFrame::Method(
                     channel_id,
                     AMQPClass::Channel(AmqpChannel::CloseOk(close_ok)),
                 ) => {
-                    let mut channels = inner.channels.lock().unwrap();
-                    // if we're getting close-ok, send it to the channel handle, then
-                    // remove that handle from our hashmap.
-                    match channels.entry(channel_id) {
+                    // send the close-ok to the channel handle, then remove that handle from our
+                    // hashmap since we'll never send to it again.
+                    match inner.channels.lock().unwrap().entry(channel_id) {
                         Entry::Occupied(entry) => {
                             let result = entry
                                 .get()
@@ -170,8 +190,7 @@ impl ConnectionState {
                     }
                 }
                 AMQPFrame::Method(channel_id, method) => {
-                    let channels = inner.channels.lock().unwrap();
-                    if let Some(handle) = channels.get(&channel_id) {
+                    if let Some(handle) = inner.channels.lock().unwrap().get(&channel_id) {
                         handle.send_rpc(method)
                     } else {
                         Err(ErrorKind::ChannelDropped(channel_id))?

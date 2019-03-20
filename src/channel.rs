@@ -3,28 +3,47 @@ use crate::{ErrorKind, Result};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::{AMQPProperties, Publish};
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
-use amq_protocol::protocol::channel::CloseOk;
+use amq_protocol::protocol::channel::{Close, CloseOk};
 use amq_protocol::protocol::AMQPClass;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use failure::ResultExt;
 use log::{debug, trace};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+#[derive(Default)]
+struct ServerClosedError {
+    is_closed: AtomicBool,
+    error: Mutex<Option<ErrorKind>>,
+}
 
 pub(crate) struct ChannelHandle {
     pub(crate) rpc: Sender<AMQPClass>,
+    server_closed: Arc<ServerClosedError>,
     id: u16,
 }
 
 pub(crate) struct ChannelBuilder {
     pub(crate) rpc: Receiver<AMQPClass>,
+    server_closed: Arc<ServerClosedError>,
     id: u16,
 }
 
 impl ChannelHandle {
     pub(crate) fn new(id: u16) -> (ChannelHandle, ChannelBuilder) {
+        let server_closed = Arc::default();
         let (tx, rx) = unbounded();
         (
-            ChannelHandle { rpc: tx, id },
-            ChannelBuilder { rpc: rx, id },
+            ChannelHandle {
+                rpc: tx,
+                server_closed: Arc::clone(&server_closed),
+                id,
+            },
+            ChannelBuilder {
+                rpc: rx,
+                server_closed,
+                id,
+            },
         )
     }
 
@@ -34,6 +53,18 @@ impl ChannelHandle {
             .send(class)
             .context(ErrorKind::ChannelDropped(self.id))?)
     }
+
+    pub(crate) fn set_server_closed(&self, close: Close) {
+        {
+            let mut error = self.server_closed.error.lock().unwrap();
+            *error = Some(ErrorKind::ServerClosedChannel(
+                self.id,
+                close.reply_code,
+                close.reply_text,
+            ));
+        }
+        self.server_closed.is_closed.store(true, Ordering::SeqCst);
+    }
 }
 
 pub struct Channel {
@@ -41,6 +72,7 @@ pub struct Channel {
     rpc: Receiver<AMQPClass>,
     id: u16,
     closed: bool,
+    server_closed: Arc<ServerClosedError>,
 }
 
 impl Drop for Channel {
@@ -56,6 +88,7 @@ impl Channel {
             loop_handle,
             rpc: builder.rpc,
             closed: false,
+            server_closed: builder.server_closed,
         }
     }
 
@@ -72,6 +105,7 @@ impl Channel {
         immediate: bool,
         properties: &AMQPProperties,
     ) -> Result<()> {
+        self.check_server_closed()?;
         self.loop_handle.call_nowait(
             self.id,
             AmqpBasic::Publish(Publish {
@@ -91,7 +125,21 @@ impl Channel {
         )
     }
 
+    fn check_server_closed(&self) -> Result<()> {
+        if !self.server_closed.is_closed.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        // got a server close request - bail with the error we were given; safe to
+        // unwrap because is_closed is only set after the error is filled in
+        let error = self.server_closed.error.lock().unwrap();
+        Err(error.clone().unwrap())?
+    }
+
     fn close_and_wait(&mut self) -> Result<()> {
+        // if server already closed, nothing for us to do.
+        self.check_server_closed()?;
+
         if self.closed {
             // only possible if we're being called again from our Drop impl
             Ok(())

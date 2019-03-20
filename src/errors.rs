@@ -86,6 +86,9 @@ pub enum ErrorKind {
     #[fail(display = "client closed connection (code={} message={})", _0, _1)]
     ClientClosedConnection(u16, String),
 
+    #[fail(display = "server closed channel {} (code={}, message={})", _0, _1, _2)]
+    ServerClosedChannel(u16, u16, String),
+
     #[fail(display = "event loop thread tried to communicate with a nonexistent client")]
     EventLoopClientDropped,
 
