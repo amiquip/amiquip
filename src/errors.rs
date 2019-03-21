@@ -104,6 +104,9 @@ pub enum ErrorKind {
     #[fail(display = "fork failed")]
     ForkFailed,
 
+    #[fail(display = "no more channel ids are available")]
+    ExhaustedChannelIds,
+
     #[fail(display = "requested channel id {} is unavailable", _0)]
     UnavailableChannelId(u16),
 

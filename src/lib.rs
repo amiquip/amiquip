@@ -9,6 +9,7 @@ mod heartbeats;
 mod serialize;
 mod connection;
 mod channel;
+mod io_loop;
 
 pub use auth::Auth;
 pub use connection_options::ConnectionOptions;

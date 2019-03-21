@@ -15,6 +15,7 @@ mio = "0.6"
 mio-extras = "2.0"
 cookie-factory = "0.2"
 crossbeam-channel = "0.3"
+indexmap = "*"
 
 # only for test binary - remove later
 env_logger = "0.6"
