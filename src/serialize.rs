@@ -2,6 +2,7 @@ use crate::{ErrorKind, Result};
 use amq_protocol::frame::generation::{
     gen_content_body_frame, gen_content_header_frame, gen_heartbeat_frame, gen_method_frame,
 };
+use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::AMQPProperties;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
@@ -15,20 +16,50 @@ pub trait TryFromAmqpClass: Sized {
     fn try_from(class: AMQPClass) -> Result<Self>;
 }
 
-impl TryFromAmqpClass for amq_protocol::protocol::channel::CloseOk {
-    fn try_from(class: AMQPClass) -> Result<Self> {
-        match class {
-            AMQPClass::Channel(AmqpChannel::CloseOk(close_ok)) => Ok(close_ok),
-            class => Err(ErrorKind::BadRpcResponse(class))?,
+macro_rules! impl_try_from_class {
+    ($type:ty, $class:path, $method:path) => {
+        impl TryFromAmqpClass for $type {
+            fn try_from(class: AMQPClass) -> Result<Self> {
+                match class {
+                    $class($method(val)) => Ok(val),
+                    _ => Err(ErrorKind::FrameUnexpected)?,
+                }
+            }
         }
-    }
+    };
 }
 
-impl TryFromAmqpClass for amq_protocol::protocol::channel::OpenOk {
-    fn try_from(class: AMQPClass) -> Result<Self> {
-        match class {
-            AMQPClass::Channel(AmqpChannel::OpenOk(open_ok)) => Ok(open_ok),
-            class => Err(ErrorKind::BadRpcResponse(class))?,
+impl_try_from_class!(amq_protocol::protocol::connection::Start,
+                     AMQPClass::Connection, AmqpConnection::Start);
+impl_try_from_class!(amq_protocol::protocol::connection::Secure,
+                     AMQPClass::Connection, AmqpConnection::Secure);
+impl_try_from_class!(amq_protocol::protocol::connection::Tune,
+                     AMQPClass::Connection, AmqpConnection::Tune);
+impl_try_from_class!(amq_protocol::protocol::connection::OpenOk,
+                     AMQPClass::Connection, AmqpConnection::OpenOk);
+impl_try_from_class!(amq_protocol::protocol::connection::Close,
+                     AMQPClass::Connection, AmqpConnection::Close);
+
+impl_try_from_class!(amq_protocol::protocol::channel::OpenOk,
+                     AMQPClass::Channel, AmqpChannel::OpenOk);
+impl_try_from_class!(amq_protocol::protocol::channel::CloseOk,
+                     AMQPClass::Channel, AmqpChannel::CloseOk);
+
+pub(crate) trait TryFromAmqpFrame: Sized {
+    fn try_from(channel_id: u16, frame: AMQPFrame) -> Result<Self>;
+}
+
+impl<T: TryFromAmqpClass> TryFromAmqpFrame for T {
+    fn try_from(expected_id: u16, frame: AMQPFrame) -> Result<Self> {
+        match frame {
+            AMQPFrame::Method(channel_id, method) => {
+                if expected_id == channel_id {
+                    Self::try_from(method)
+                } else {
+                    Err(ErrorKind::FrameUnexpectedChannelId)?
+                }
+            }
+            _ => Err(ErrorKind::FrameUnexpected)?,
         }
     }
 }

@@ -1,5 +1,4 @@
 use amq_protocol::frame::AMQPFrame;
-use amq_protocol::protocol::AMQPClass;
 use failure::{Backtrace, Context, Fail};
 use std::sync::Arc;
 use std::{fmt, result};
@@ -71,9 +70,11 @@ pub enum ErrorKind {
     #[fail(display = "invalid credentials")]
     InvalidCredentials,
 
+    // TODO remove after rewriting event loop
     #[fail(display = "handshake failure - server sent a frame unexpectedly")]
     HandshakeUnexpectedServerFrame(AMQPFrame),
 
+    // TODO remove after rewriting event loop
     #[fail(display = "handshake protocol failure - expected {} frame", _0)]
     HandshakeWrongServerFrame(&'static str, AMQPFrame),
 
@@ -98,8 +99,11 @@ pub enum ErrorKind {
     #[fail(display = "channel {} dropped without being cleanly closed", _0)]
     ChannelDropped(u16),
 
-    #[fail(display = "AMQP protocol error - received unexpected response")]
-    BadRpcResponse(AMQPClass),
+    #[fail(display = "AMQP protocol error - received message for unexpected channel")]
+    FrameUnexpectedChannelId,
+
+    #[fail(display = "AMQP protocol error - received unexpected frame")]
+    FrameUnexpected,
 
     #[fail(display = "fork failed")]
     ForkFailed,
