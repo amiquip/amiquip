@@ -39,7 +39,7 @@ impl<T> ChannelSlots<T> {
             Some(id) => id,
             None => return self.insert_unused_channel_id(make_entry),
         };
-        if channel_id == 0 || channel_id > self.channel_max {
+        if channel_id > self.channel_max {
             return Err(ErrorKind::UnavailableChannelId(channel_id))?;
         }
         match self.slots.entry(channel_id) {
@@ -127,13 +127,6 @@ mod tests {
             return;
         }
         cs.set_channel_max(4);
-    }
-
-    #[test]
-    fn insert_channel_0_fails() {
-        let mut cs = with_channel_max(4);
-        let res = cs.insert(Some(0), id);
-        assert_eq!(*res.unwrap_err().kind(), ErrorKind::UnavailableChannelId(0));
     }
 
     #[test]

@@ -5,6 +5,7 @@ use amq_protocol::protocol::constants::FRAME_MIN_SIZE;
 use amq_protocol::types::{AMQPValue, FieldTable};
 use std::time::Duration;
 
+#[derive(Clone, Debug)]
 pub struct ConnectionOptions<Auth: Sasl> {
     pub(crate) auth: Auth,
     pub(crate) virtual_host: String,
@@ -12,8 +13,8 @@ pub struct ConnectionOptions<Auth: Sasl> {
     pub(crate) channel_max: u16,
     pub(crate) frame_max: u32,
     pub(crate) heartbeat: u16,
-    pub(crate) poll_timeout: Option<Duration>,
-    pub(crate) io_thread_channel_bound: usize,
+    pub(crate) poll_timeout: Option<Duration>, // TODO remove
+    pub(crate) io_thread_channel_bound: usize, // TODO remove
 }
 
 impl<Auth: Sasl> Default for ConnectionOptions<Auth> {

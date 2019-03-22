@@ -1,101 +1,94 @@
-use super::Inner;
-use crate::auth::Sasl;
-use crate::serialize::TryFromAmqpFrame;
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
+use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
-use amq_protocol::protocol::connection::OpenOk as ConnectionOpenOk;
-use amq_protocol::protocol::connection::{Secure, Start, Tune, TuneOk};
-use crossbeam_channel::Sender;
-use log::{warn, debug};
+use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
+use amq_protocol::protocol::{AMQPClass, AMQPHardError};
+use failure::ResultExt;
+use log::error;
 
-pub(crate) struct IoLoopHandle {}
+use super::Inner;
 
 #[derive(Debug)]
-pub(super) enum HandshakeState {
-    Start,
-    Secure,
-    Tune,
-    Open(TuneOk),
+pub(super) enum ConnectionState {
+    Steady,
     ServerClosing(ConnectionClose),
-    Done(TuneOk),
+    ClientException,
+    ClientClosed,
 }
 
-impl HandshakeState {
-    fn process<Auth: Sasl>(
-        self,
-        inner: &mut Inner<Auth>,
-        frame: AMQPFrame,
-    ) -> Result<HandshakeState> {
-        Ok(match self {
-            HandshakeState::Start => {
-                let start = Start::try_from(0, frame)?;
-                debug!("received handshake {:?}", start);
+impl ConnectionState {
+    pub(super) fn process(&mut self, inner: &mut Inner, frame: AMQPFrame) -> Result<()> {
+        // bail out if we shouldn't be getting frames
+        match self {
+            ConnectionState::Steady => (),
+            ConnectionState::ServerClosing(_)
+            | ConnectionState::ClientClosed
+            | ConnectionState::ClientException => Err(ErrorKind::FrameUnexpected)?,
+        }
 
-                let start_ok = inner.options.make_start_ok(start)?;
-                debug!("sending handshake {:?}", start_ok);
-                //inner.push_method(0, AmqpConnection::StartOk(start_ok))?;
-
-                HandshakeState::Secure
+        Ok(match frame {
+            AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
+                inner.push_method(0, AmqpConnection::CloseOk(ConnectionCloseOk {}))?;
+                inner.seal_writes();
+                *self = ConnectionState::ServerClosing(close);
             }
-            HandshakeState::Secure => {
-                // We currently only support PLAIN and EXTERNAL, neither of which
-                // need a secure/secure-ok
-                if let Ok(secure) = Secure::try_from(0, frame.clone()) {
-                    debug!("received unsupported handshake {:?}", secure);
-                    return Err(ErrorKind::SaslSecureNotSupported)?;
-                }
-                return HandshakeState::Tune.process(inner, frame);
+            AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::CloseOk(_))) => {
+                inner
+                    .chan_slots
+                    .get(0)
+                    .unwrap() // channel 0 slot always exist if we got to Steady state
+                    .tx
+                    .send(AMQPFrame::Method(
+                        0,
+                        AMQPClass::Connection(AmqpConnection::CloseOk(ConnectionCloseOk {})),
+                    ))
+                    .context(ErrorKind::EventLoopClientDropped)?;
+                *self = ConnectionState::ClientClosed;
             }
-            HandshakeState::Tune => {
-                let tune = Tune::try_from(0, frame)?;
-                debug!("received handshake {:?}", tune);
-
-                let tune_ok = inner.options.make_tune_ok(tune)?;
-                //inner.start_heartbeats(tune_ok.heartbeat);
-
-                debug!("sending handshake {:?}", tune_ok);
-                //inner.push_method(0, AmqpConnection::TuneOk(tune_ok.clone()))?;
-
-                let open = inner.options.make_open();
-                debug!("sending handshake {:?}", open);
-                //inner.push_method(0, AmqpConnection::Open(open))?;
-
-                HandshakeState::Open(tune_ok)
+            // TODO handle other expected channel 0 methods
+            AMQPFrame::Method(0, other) => {
+                let text = format!("do not know how to handle channel 0 method {:?}", other);
+                error!("{} - closing connection", text);
+                let close = ConnectionClose {
+                    reply_code: AMQPHardError::NOTIMPLEMENTED.get_id(),
+                    reply_text: text,
+                    class_id: 0,
+                    method_id: 0,
+                };
+                inner.push_method(0, AmqpConnection::Close(close))?;
+                inner.seal_writes();
+                *self = ConnectionState::ClientException;
             }
-            HandshakeState::Open(tune_ok) => {
-                // If we sent bad tune params, server might send us a Close.
-                if let Ok(close) = ConnectionClose::try_from(0, frame.clone()) {
-                    //inner.set_server_close_req(close);
-                    return Ok(HandshakeState::ServerClosing(close));
-                }
-
-                let open_ok = ConnectionOpenOk::try_from(0, frame)?;
-                debug!("received handshake {:?}", open_ok);
-
-                HandshakeState::Done(tune_ok)
-            }
-            HandshakeState::ServerClosing(_) | HandshakeState::Done(_) => {
-                unreachable!("handshake is done - HandshakeState::process() should not be called");
-            }
+            _ => panic!("TODO"),
         })
     }
 }
 
+/*
+use super::Inner;
+use crate::auth::Sasl;
+use crate::connection_options::ConnectionOptions;
+use crate::serialize::TryFromAmqpFrame;
+use crate::{ErrorKind, Result};
+use amq_protocol::frame::AMQPFrame;
+use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
+use amq_protocol::protocol::connection::Close as ConnectionClose;
+use crossbeam_channel::Sender;
+use log::debug;
+
 #[derive(Debug)]
 pub(super) enum ConnectionState {
-    Handshake(Sender<IoLoopHandle>, HandshakeState),
+    //Handshake(Sender<IoLoopHandle>, HandshakeState<Auth>),
     Steady,
     ServerClosing(ConnectionClose),
-    ClientClosing(ConnectionClose),
+    //ClientClosing(ConnectionClose),
 }
+*/
 
-impl ConnectionState {
-    fn process<Auth: Sasl>(
-        self,
-        inner: &mut Inner<Auth>,
-        frame: AMQPFrame,
-    ) -> Result<ConnectionState> {
+/*
+impl<Auth: Sasl> ConnectionState<Auth> {
+    fn process(self, inner: &mut Inner, frame: AMQPFrame) -> Result<Self> {
         Ok(match self {
             ConnectionState::Handshake(sender, state) => match state.process(inner, frame)? {
                 HandshakeState::Done(_tune_ok) => {
@@ -109,8 +102,9 @@ impl ConnectionState {
                 warn!("received unexpected frame after server close - {:?}", frame);
                 ConnectionState::ServerClosing(close)
             }
-            ConnectionState::ClientClosing(_close) => unimplemented!(),
+            //ConnectionState::ClientClosing(_close) => unimplemented!(),
             ConnectionState::Steady => unimplemented!(),
         })
     }
 }
+*/

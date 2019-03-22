@@ -114,6 +114,12 @@ pub enum ErrorKind {
     #[fail(display = "requested channel id {} is unavailable", _0)]
     UnavailableChannelId(u16),
 
+    #[fail(display = "internal client exception - received unhandled frames from server")]
+    ClientException,
+
+    #[fail(display = "I/O thread died unexpectedly: {}", _0)]
+    IoThreadPanic(String),
+
     #[doc(hidden)]
     #[fail(display = "invalid error case")]
     __Nonexhaustive,

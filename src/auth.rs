@@ -1,8 +1,9 @@
-pub trait Sasl: Default + Send + 'static {
+pub trait Sasl: Default + Clone + Send + 'static {
     fn mechanism(&self) -> String;
     fn response(&self) -> String;
 }
 
+#[derive(Debug, Clone)]
 pub enum Auth {
     Plain { username: String, password: String },
 }

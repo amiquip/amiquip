@@ -39,6 +39,8 @@ impl_try_from_class!(amq_protocol::protocol::connection::OpenOk,
                      AMQPClass::Connection, AmqpConnection::OpenOk);
 impl_try_from_class!(amq_protocol::protocol::connection::Close,
                      AMQPClass::Connection, AmqpConnection::Close);
+impl_try_from_class!(amq_protocol::protocol::connection::CloseOk,
+                     AMQPClass::Connection, AmqpConnection::CloseOk);
 
 impl_try_from_class!(amq_protocol::protocol::channel::OpenOk,
                      AMQPClass::Channel, AmqpChannel::OpenOk);
