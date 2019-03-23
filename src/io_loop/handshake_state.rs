@@ -62,7 +62,6 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 if let Ok(close) = Close::try_from(0, frame.clone()) {
                     inner.push_method(0, AmqpConnection::CloseOk(CloseOk {}))?;
                     inner.seal_writes();
-                    //inner.set_server_close_req(close);
                     *self = HandshakeState::ServerClosing(close);
                     return Ok(());
                 }

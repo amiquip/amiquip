@@ -2,7 +2,9 @@ use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::errors::ArcError;
 use crate::frame_buffer::FrameBuffer;
-use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass, TryFromAmqpFrame};
+use crate::serialize::{
+    IntoAmqpClass, OutputBuffer, SealableOutputBuffer, TryFromAmqpClass, TryFromAmqpFrame,
+};
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
@@ -401,11 +403,9 @@ impl IoLoop {
 
 struct Inner {
     // Buffer of data waiting to be written. May contain multiple serialized frames.
-    outbuf: OutputBuffer,
-
-    // If true, no new frames (except heartbeats) may be pushed onto outbuf. This should
-    // be called when we've sent a close-ok, for example.
-    writes_sealed: bool,
+    // Once we've appended a connection Close or CloseOk, it will be sealed (so any
+    // future writes will be silently discarded).
+    outbuf: SealableOutputBuffer,
 
     // Handle to I/O loop timers for tracking rx/tx heartbeats.
     heartbeats: HeartbeatTimers,
@@ -427,8 +427,7 @@ struct Inner {
 impl Inner {
     fn new(heartbeats: HeartbeatTimers, mio_channel_bound: usize) -> Self {
         Inner {
-            outbuf: OutputBuffer::with_protocol_header(),
-            writes_sealed: false,
+            outbuf: SealableOutputBuffer::new(OutputBuffer::with_protocol_header()),
             heartbeats,
             chan_slots: ChannelSlots::new(),
             frame_max: 0,
@@ -439,23 +438,18 @@ impl Inner {
 
     #[inline]
     fn are_writes_sealed(&self) -> bool {
-        self.writes_sealed
+        self.outbuf.is_sealed()
     }
 
     #[inline]
     fn seal_writes(&mut self) {
         trace!("sealing writes - no more data should be enqueued");
-        self.writes_sealed = true;
+        self.outbuf.seal();
     }
 
     #[inline]
     fn push_method<M: IntoAmqpClass>(&mut self, channel_id: u16, method: M) -> Result<()> {
-        if self.writes_sealed {
-            // discard data - we're in the process of closing the connection
-            Ok(())
-        } else {
-            self.outbuf.push_method(channel_id, method)
-        }
+        self.outbuf.push_method(channel_id, method)
     }
 
     #[inline]
@@ -515,40 +509,37 @@ impl Inner {
                 Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
             };
 
-            if !self.writes_sealed {
-                match command {
-                    IoLoopMessage::Rpc(IoLoopRpc::ConnectionClose(buf)) => {
-                        self.outbuf.append(buf);
-                        trace!("sealing writes - no more data should be enqueued");
-                        self.writes_sealed = true;
-                    }
-                    IoLoopMessage::Rpc(IoLoopRpc::Call(buf)) => {
-                        self.outbuf.append(buf);
-                    }
-                    IoLoopMessage::Command(IoLoopCommand::AllocateChannel(channel_id, tx)) => {
-                        let io_loop_result = Arc::clone(&self.io_loop_result);
-                        let mio_channel_bound = self.mio_channel_bound;
-                        let result = self.chan_slots.insert(channel_id, |channel_id| {
-                            let (slot, handle) =
-                                ChannelSlot::new(mio_channel_bound, channel_id, io_loop_result);
-                            poll.register(
-                                &slot.rx,
-                                Token(channel_id as usize),
-                                Ready::readable(),
-                                PollOpt::edge(),
-                            )
-                            .context(ErrorKind::Io)?;
-                            Ok((slot, handle))
-                        });
-                        match tx.send(result) {
-                            Ok(()) => (),
-                            Err(SendError(Ok(handle))) => {
-                                // send failed - clear the allocated channel
-                                self.chan_slots.remove(handle.channel_id);
-                            }
-                            Err(SendError(Err(_))) => {
-                                // send failed, but so did channel creation. do nothing
-                            }
+            match command {
+                IoLoopMessage::Rpc(IoLoopRpc::ConnectionClose(buf)) => {
+                    self.outbuf.append(buf);
+                    self.seal_writes();
+                }
+                IoLoopMessage::Rpc(IoLoopRpc::Call(buf)) => {
+                    self.outbuf.append(buf);
+                }
+                IoLoopMessage::Command(IoLoopCommand::AllocateChannel(channel_id, tx)) => {
+                    let io_loop_result = Arc::clone(&self.io_loop_result);
+                    let mio_channel_bound = self.mio_channel_bound;
+                    let result = self.chan_slots.insert(channel_id, |channel_id| {
+                        let (slot, handle) =
+                            ChannelSlot::new(mio_channel_bound, channel_id, io_loop_result);
+                        poll.register(
+                            &slot.rx,
+                            Token(channel_id as usize),
+                            Ready::readable(),
+                            PollOpt::edge(),
+                        )
+                        .context(ErrorKind::Io)?;
+                        Ok((slot, handle))
+                    });
+                    match tx.send(result) {
+                        Ok(()) => (),
+                        Err(SendError(Ok(handle))) => {
+                            // send failed - clear the allocated channel
+                            self.chan_slots.remove(handle.channel_id);
+                        }
+                        Err(SendError(Err(_))) => {
+                            // send failed, but so did channel creation. do nothing
                         }
                     }
                 }

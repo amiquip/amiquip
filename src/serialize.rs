@@ -112,7 +112,6 @@ impl IntoAmqpClass for AmqpChannel {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct OutputBuffer(Vec<u8>);
 
 impl OutputBuffer {
@@ -198,6 +197,85 @@ impl Index<RangeFrom<usize>> for OutputBuffer {
     #[inline]
     fn index(&self, index: RangeFrom<usize>) -> &[u8] {
         &self.0[index]
+    }
+}
+
+pub(super) struct SealableOutputBuffer {
+    buf: OutputBuffer,
+    sealed: bool,
+}
+
+impl SealableOutputBuffer {
+    pub(super) fn new(buf: OutputBuffer) -> SealableOutputBuffer {
+        SealableOutputBuffer  {
+            buf,
+            sealed: false,
+        }
+    }
+
+    #[inline]
+    pub(super) fn seal(&mut self) {
+        self.sealed = true;
+    }
+
+    #[inline]
+    pub(super) fn is_sealed(&self) -> bool {
+        self.sealed
+    }
+
+    #[inline]
+    pub(super) fn push_heartbeat(&mut self) {
+        if !self.sealed {
+            self.buf.push_heartbeat();
+        }
+    }
+
+    #[inline]
+    pub(super) fn push_method<M>(&mut self, channel_id: u16, method: M) -> Result<()>
+    where
+        M: IntoAmqpClass,
+    {
+        if self.sealed {
+            Ok(())
+        } else {
+            self.buf.push_method(channel_id, method)
+        }
+    }
+
+    #[inline]
+    pub(super) fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+
+    #[inline]
+    pub(super) fn len(&self) -> usize {
+        self.buf.len()
+    }
+
+    #[inline]
+    pub(super) fn clear(&mut self) {
+        self.buf.clear()
+    }
+
+    #[inline]
+    pub(super) fn drain_written(&mut self, n: usize) {
+        self.buf.drain_written(n)
+    }
+
+    #[inline]
+    pub(super) fn append(&mut self, other: OutputBuffer) {
+        if !self.sealed {
+            self.buf.append(other)
+        }
+    }
+}
+
+impl Index<RangeFrom<usize>> for SealableOutputBuffer {
+    type Output = [u8];
+
+    #[inline]
+    fn index(&self, index: RangeFrom<usize>) -> &[u8] {
+        &self.buf[index]
     }
 }
 
