@@ -5,10 +5,9 @@ use crate::frame_buffer::FrameBuffer;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass, TryFromAmqpFrame};
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
-use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
-use amq_protocol::protocol::connection::{Close, CloseOk, TuneOk};
-use amq_protocol::protocol::constants::REPLY_SUCCESS;
+use amq_protocol::protocol::connection::TuneOk;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
+use crossbeam_channel::SendError;
 use crossbeam_channel::Sender as CrossbeamSender;
 use failure::{Fail, ResultExt};
 use log::{debug, error, trace, warn};
@@ -23,11 +22,13 @@ use std::sync::{Arc, Mutex};
 use std::thread::{Builder, JoinHandle};
 use std::time::Duration;
 
+mod channel_handle;
 mod channel_slots;
 mod connection_state;
 mod handshake_state;
 mod heartbeat_timers;
 
+pub(crate) use channel_handle::{Channel0Handle, ChannelHandle};
 use channel_slots::ChannelSlots;
 use connection_state::ConnectionState;
 use handshake_state::HandshakeState;
@@ -36,55 +37,78 @@ use heartbeat_timers::{HeartbeatKind, HeartbeatState, HeartbeatTimers};
 const STREAM: Token = Token(u16::max_value() as usize + 1);
 const HEARTBEAT: Token = Token(u16::max_value() as usize + 2);
 
+enum IoLoopRpc {
+    ConnectionClose(OutputBuffer),
+    Call(OutputBuffer),
+}
+
 enum IoLoopCommand {
-    CloseConnection(OutputBuffer),
-    Send(OutputBuffer),
+    AllocateChannel(Option<u16>, CrossbeamSender<Result<IoLoopHandle>>),
+}
+
+enum IoLoopMessage {
+    Rpc(IoLoopRpc),
+    Command(IoLoopCommand),
 }
 
 struct ChannelSlot {
-    rx: MioReceiver<IoLoopCommand>,
+    rx: MioReceiver<IoLoopMessage>,
     tx: CrossbeamSender<AMQPFrame>,
 }
 
-pub(crate) struct ChannelHandle {
-    io_loop_result: Arc<Mutex<Option<Result<()>>>>,
-    frame_max: usize,
-    channel_id: u16,
-    tx: MioSyncSender<IoLoopCommand>,
-    rx: CrossbeamReceiver<AMQPFrame>,
+impl ChannelSlot {
+    fn new(
+        mio_channel_bound: usize,
+        channel_id: u16,
+        io_loop_result: Arc<Mutex<Option<Result<()>>>>,
+    ) -> (ChannelSlot, IoLoopHandle) {
+        let (mio_tx, mio_rx) = mio_sync_channel(mio_channel_bound);
+        let (tx, rx) = crossbeam_channel::unbounded();
+
+        let channel_slot = ChannelSlot { rx: mio_rx, tx };
+
+        let loop_handle = IoLoopHandle {
+            channel_id,
+            buf: OutputBuffer::empty(),
+            tx: mio_tx,
+            rx,
+            io_loop_result,
+        };
+
+        (channel_slot, loop_handle)
+    }
 }
-// TODO close on drop if we're not channel 0. Or should channel 0 close the connection
-// if it's dropped?
 
-impl ChannelHandle {
-    pub(crate) fn close_connection(&mut self) -> Result<CloseOk> {
-        assert!(
-            self.channel_id == 0,
-            "connection can only be closed from channel 0"
-        );
+struct IoLoopHandle {
+    channel_id: u16,
+    buf: OutputBuffer,
+    tx: MioSyncSender<IoLoopMessage>,
+    rx: CrossbeamReceiver<AMQPFrame>,
+    io_loop_result: Arc<Mutex<Option<Result<()>>>>,
+}
 
-        let close = AmqpConnection::Close(Close {
-            reply_code: REPLY_SUCCESS as u16,
-            reply_text: "goodbye".to_string(),
-            class_id: 0,
-            method_id: 0,
-        });
-
-        let buf = OutputBuffer::with_method(self.channel_id, close)?;
-        self.call_command(IoLoopCommand::CloseConnection(buf))
+impl IoLoopHandle {
+    fn make_buf<M: IntoAmqpClass>(&mut self, method: M) -> Result<OutputBuffer> {
+        debug_assert!(self.buf.is_empty());
+        self.buf.push_method(self.channel_id, method)?;
+        Ok(self.buf.drain_into_new_buf())
     }
 
-    pub(crate) fn call<M: IntoAmqpClass, T: TryFromAmqpClass>(&mut self, method: M) -> Result<T> {
-        let buf = OutputBuffer::with_method(self.channel_id, method)?;
-        self.call_command(IoLoopCommand::Send(buf))
+    fn send_command(&mut self, command: IoLoopCommand) -> Result<()> {
+        self.tx
+            .send(IoLoopMessage::Command(command))
+            .map_err(|_| self.io_loop_error())
     }
 
-    pub(crate) fn io_loop_result(&self) -> Option<Result<()>> {
-        self.io_loop_result.lock().unwrap().clone()
+    fn call<M: IntoAmqpClass, T: TryFromAmqpClass>(&mut self, method: M) -> Result<T> {
+        let buf = self.make_buf(method)?;
+        self.call_rpc(IoLoopRpc::Call(buf))
     }
 
-    fn call_command<T: TryFromAmqpClass>(&mut self, command: IoLoopCommand) -> Result<T> {
-        self.tx.send(command).map_err(|_| self.io_loop_error())?;
+    fn call_rpc<T: TryFromAmqpClass>(&mut self, rpc: IoLoopRpc) -> Result<T> {
+        self.tx
+            .send(IoLoopMessage::Rpc(rpc))
+            .map_err(|_| self.io_loop_error())?;
         let response = self.rx.recv().map_err(|_| self.io_loop_error())?;
         <T as TryFromAmqpFrame>::try_from(self.channel_id, response)
     }
@@ -96,13 +120,16 @@ impl ChannelHandle {
             Some(Err(err)) => err.clone(),
         }
     }
+
+    fn io_loop_result(&self) -> Option<Result<()>> {
+        self.io_loop_result.lock().unwrap().clone()
+    }
 }
 
 pub(crate) struct IoLoop {
     stream: TcpStream,
     poll: Poll,
     poll_timeout: Option<Duration>,
-    mio_channel_bound: usize,
     frame_buffer: FrameBuffer,
     inner: Inner,
 }
@@ -135,51 +162,35 @@ impl IoLoop {
             stream,
             poll,
             poll_timeout,
-            mio_channel_bound: mem_channel_bound,
             frame_buffer: FrameBuffer::new(),
-            inner: Inner::new(heartbeats),
+            inner: Inner::new(heartbeats, mem_channel_bound),
         })
     }
 
     pub(crate) fn start<Auth: Sasl>(
         self,
         options: ConnectionOptions<Auth>,
-    ) -> Result<(JoinHandle<()>, ChannelHandle)> {
-        let (tune_ok_tx, tune_ok_rx) = crossbeam_channel::bounded(1);
-        let (ch0_mio_tx, ch0_mio_rx) = mio_sync_channel(self.mio_channel_bound);
-        let (ch0_tx, ch0_rx) = crossbeam_channel::unbounded();
+    ) -> Result<(JoinHandle<()>, Channel0Handle)> {
+        let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
+        let io_loop_result = Arc::clone(&self.inner.io_loop_result);
 
-        let ch0_slot = ChannelSlot {
-            rx: ch0_mio_rx,
-            tx: ch0_tx,
-        };
-
-        let io_loop_result = Arc::new(Mutex::new(None));
-        let io_loop_result2 = Arc::clone(&io_loop_result);
+        let (ch0_slot, ch0_handle) =
+            ChannelSlot::new(self.inner.mio_channel_bound, 0, Arc::clone(&io_loop_result));
 
         let join_handle = Builder::new()
             .name("amiquip-io".to_string())
             .spawn(move || {
-                let result = self.thread_main(options, tune_ok_tx, ch0_slot);
-                let mut io_loop_result2 = io_loop_result2.lock().unwrap();
-                *io_loop_result2 = Some(result);
+                let result = self.thread_main(options, handshake_done_tx, ch0_slot);
+                let mut io_loop_result = io_loop_result.lock().unwrap();
+                *io_loop_result = Some(result);
             })
             .context(ErrorKind::ForkFailed)?;
 
-        match tune_ok_rx.recv() {
-            Ok(tune_ok) => Ok((
-                join_handle,
-                ChannelHandle {
-                    io_loop_result,
-                    channel_id: 0,
-                    frame_max: tune_ok.frame_max as usize,
-                    tx: ch0_mio_tx,
-                    rx: ch0_rx,
-                },
-            )),
+        match handshake_done_rx.recv() {
+            Ok(()) => Ok((join_handle, Channel0Handle::new(ch0_handle))),
             Err(_) => {
                 let result = match join_handle.join() {
-                    Ok(()) => io_loop_result.lock().unwrap().clone().unwrap(),
+                    Ok(()) => ch0_handle.io_loop_result().unwrap(),
                     Err(err) => Err(ErrorKind::IoThreadPanic(format!("{:?}", err)).into()),
                 };
                 assert!(
@@ -194,7 +205,7 @@ impl IoLoop {
     fn thread_main<Auth: Sasl>(
         mut self,
         options: ConnectionOptions<Auth>,
-        tune_ok_tx: crossbeam_channel::Sender<TuneOk>,
+        handshake_done_tx: crossbeam_channel::Sender<()>,
         ch0_slot: ChannelSlot,
     ) -> Result<()> {
         self.poll
@@ -202,12 +213,15 @@ impl IoLoop {
             .context(ErrorKind::Io)?;
         let tune_ok = self.run_handshake(options)?;
         let channel_max = tune_ok.channel_max;
-        match tune_ok_tx.send(tune_ok) {
+        match handshake_done_tx.send(()) {
             Ok(_) => (),
             Err(_) => return Ok(()),
         }
         self.inner.chan_slots.set_channel_max(channel_max);
-        self.inner.chan_slots.insert(Some(0), |_| ch0_slot)?;
+        self.inner.frame_max = tune_ok.frame_max as usize;
+        self.inner
+            .chan_slots
+            .insert(Some(0), |_| Ok((ch0_slot, ())))?;
         self.run_connection()
     }
 
@@ -307,7 +321,7 @@ impl IoLoop {
             }
             HEARTBEAT => self.inner.process_heartbeat_timers()?,
             Token(n) if n <= u16::max_value() as usize => {
-                self.inner.process_channel_request(n as u16)?
+                self.inner.process_channel_request(n as u16, &self.poll)?
             }
             _ => unreachable!(),
         })
@@ -344,7 +358,11 @@ impl IoLoop {
                 .poll(&mut events, self.poll_timeout)
                 .context(ErrorKind::Io)?;
             if events.is_empty() {
-                return Err(ErrorKind::SocketPollTimeout)?;
+                // TODO we get spurious wakeups when (e.g.) channels are closed and
+                // the receiver goes away. Need to check for poll timeout some other
+                // way...
+                //return Err(ErrorKind::SocketPollTimeout)?;
+                continue;
             }
 
             let had_data_to_write = self.inner.has_data_to_write();
@@ -394,15 +412,28 @@ struct Inner {
 
     // Slots for open channels. Channel 0 should be here once handshake is done.
     chan_slots: ChannelSlots<ChannelSlot>,
+
+    // Frame size (negotiated during handshake).
+    frame_max: usize,
+
+    // Bound for in-memory channels that send to our I/O thread. (Channels going _from_
+    // the I/O thread are unbounded to prevent blocking the I/O thread on slow receviers.)
+    mio_channel_bound: usize,
+
+    // Slot to store the final result of our I/O thread.
+    io_loop_result: Arc<Mutex<Option<Result<()>>>>,
 }
 
 impl Inner {
-    fn new(heartbeats: HeartbeatTimers) -> Self {
+    fn new(heartbeats: HeartbeatTimers, mio_channel_bound: usize) -> Self {
         Inner {
             outbuf: OutputBuffer::with_protocol_header(),
             writes_sealed: false,
             heartbeats,
             chan_slots: ChannelSlots::new(),
+            frame_max: 0,
+            mio_channel_bound,
+            io_loop_result: Arc::default(),
         }
     }
 
@@ -472,12 +503,12 @@ impl Inner {
         Ok(())
     }
 
-    fn process_channel_request(&mut self, channel_id: u16) -> Result<()> {
-        let slot = self
-            .chan_slots
-            .get(channel_id)
-            .expect("received mio event for channel we deleted - this should be impossible");
+    fn process_channel_request(&mut self, channel_id: u16, poll: &Poll) -> Result<()> {
         loop {
+            let slot = self
+                .chan_slots
+                .get(channel_id)
+                .expect("received mio event for channel we deleted - this should be impossible");
             let command = match slot.rx.try_recv() {
                 Ok(command) => command,
                 Err(TryRecvError::Empty) => return Ok(()),
@@ -486,13 +517,39 @@ impl Inner {
 
             if !self.writes_sealed {
                 match command {
-                    IoLoopCommand::CloseConnection(buf) => {
+                    IoLoopMessage::Rpc(IoLoopRpc::ConnectionClose(buf)) => {
                         self.outbuf.append(buf);
                         trace!("sealing writes - no more data should be enqueued");
                         self.writes_sealed = true;
                     }
-                    IoLoopCommand::Send(buf) => {
+                    IoLoopMessage::Rpc(IoLoopRpc::Call(buf)) => {
                         self.outbuf.append(buf);
+                    }
+                    IoLoopMessage::Command(IoLoopCommand::AllocateChannel(channel_id, tx)) => {
+                        let io_loop_result = Arc::clone(&self.io_loop_result);
+                        let mio_channel_bound = self.mio_channel_bound;
+                        let result = self.chan_slots.insert(channel_id, |channel_id| {
+                            let (slot, handle) =
+                                ChannelSlot::new(mio_channel_bound, channel_id, io_loop_result);
+                            poll.register(
+                                &slot.rx,
+                                Token(channel_id as usize),
+                                Ready::readable(),
+                                PollOpt::edge(),
+                            )
+                            .context(ErrorKind::Io)?;
+                            Ok((slot, handle))
+                        });
+                        match tx.send(result) {
+                            Ok(()) => (),
+                            Err(SendError(Ok(handle))) => {
+                                // send failed - clear the allocated channel
+                                self.chan_slots.remove(handle.channel_id);
+                            }
+                            Err(SendError(Err(_))) => {
+                                // send failed, but so did channel creation. do nothing
+                            }
+                        }
                     }
                 }
             }

@@ -1,7 +1,7 @@
 use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
-use crate::io_loop::{ChannelHandle, IoLoop};
-use crate::{ErrorKind, Result};
+use crate::io_loop::{Channel0Handle, IoLoop};
+use crate::{Channel, ErrorKind, Result};
 use log::debug;
 use mio::net::TcpStream;
 use std::thread::JoinHandle;
@@ -9,7 +9,7 @@ use std::time::Duration;
 
 pub struct Connection {
     join_handle: Option<JoinHandle<()>>,
-    channel_0: ChannelHandle,
+    channel0: Channel0Handle,
 }
 
 impl Drop for Connection {
@@ -26,10 +26,10 @@ impl Connection {
         poll_timeout: Option<Duration>,
     ) -> Result<Connection> {
         let io_loop = IoLoop::new(stream, mem_channel_bound, poll_timeout)?;
-        let (join_handle, channel_0) = io_loop.start(options)?;
+        let (join_handle, channel0) = io_loop.start(options)?;
         Ok(Connection {
             join_handle: Some(join_handle),
-            channel_0,
+            channel0,
         })
     }
 
@@ -40,20 +40,25 @@ impl Connection {
     fn close_impl(&mut self) -> Result<()> {
         if let Some(join_handle) = self.join_handle.take() {
             debug!("closing connection");
-            self.channel_0.close_connection()?;
+            self.channel0.close_connection()?;
             join_handle
                 .join()
                 .map_err(|err| ErrorKind::IoThreadPanic(format!("{:?}", err)))?;
 
             // if join_handle joined successfully, it's safe to unwrap the io_loop_result
             // because it filled it in before exiting.
-            self.channel_0.io_loop_result().unwrap()
+            self.channel0.io_loop_result().unwrap()
         } else {
             // no join handle left - someone already took it, which is only possible
             // if we're being called from Drop after someone called close(), and drop
             // doesn't care what we return.
             Ok(())
         }
+    }
+
+    pub fn open_channel(&mut self, channel_id: Option<u16>) -> Result<Channel> {
+        let handle = self.channel0.open_channel(channel_id)?;
+        Ok(Channel::new(handle))
     }
 }
 

@@ -1,3 +1,45 @@
+use crate::io_loop::ChannelHandle;
+use crate::Result;
+use std::sync::{Arc, Mutex};
+
+pub struct Channel {
+    inner: Arc<Mutex<Inner>>,
+}
+
+impl Drop for Channel {
+    fn drop(&mut self) {
+        let _ = self.close_impl();
+    }
+}
+
+impl Channel {
+    pub(crate) fn new(handle: ChannelHandle) -> Channel {
+        let inner = Arc::new(Mutex::new(Inner::Open(handle)));
+        Channel { inner }
+    }
+
+    pub fn close(mut self) -> Result<()> {
+        self.close_impl()
+    }
+
+    fn close_impl(&mut self) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        Ok(match &mut *inner {
+            Inner::Open(handle) => {
+                handle.close()?;
+                *inner = Inner::Closed;
+            }
+            Inner::Closed => (),
+        })
+    }
+}
+
+enum Inner {
+    Open(ChannelHandle),
+    Closed,
+}
+
+/*
 use crate::event_loop::EventLoopHandle;
 use crate::{ErrorKind, Result};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
@@ -168,3 +210,4 @@ mod method {
         })
     }
 }
+*/

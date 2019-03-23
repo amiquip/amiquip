@@ -31,9 +31,9 @@ impl<T> ChannelSlots<T> {
         self.slots.get(&channel_id)
     }
 
-    pub(crate) fn insert<F>(&mut self, channel_id: Option<u16>, make_entry: F) -> Result<()>
+    pub(crate) fn insert<F, U>(&mut self, channel_id: Option<u16>, make_entry: F) -> Result<U>
     where
-        F: FnOnce(u16) -> T,
+        F: FnOnce(u16) -> Result<(T, U)>,
     {
         let channel_id = match channel_id {
             Some(id) => id,
@@ -45,8 +45,9 @@ impl<T> ChannelSlots<T> {
         match self.slots.entry(channel_id) {
             Entry::Occupied(_) => Err(ErrorKind::UnavailableChannelId(channel_id))?,
             Entry::Vacant(entry) => {
-                entry.insert(make_entry(channel_id));
-                Ok(())
+                let (t, u) = make_entry(channel_id)?;
+                entry.insert(t);
+                Ok(u)
             }
         }
     }
@@ -57,9 +58,9 @@ impl<T> ChannelSlots<T> {
         Some(entry)
     }
 
-    fn insert_unused_channel_id<F>(&mut self, make_entry: F) -> Result<()>
+    fn insert_unused_channel_id<F, U>(&mut self, make_entry: F) -> Result<U>
     where
-        F: FnOnce(u16) -> T,
+        F: FnOnce(u16) -> Result<(T, U)>,
     {
         // First try to grab the next available channel ID we're aware of; this
         // could fail if a user requested a channel ID greater than the ones we've
@@ -70,8 +71,9 @@ impl<T> ChannelSlots<T> {
             match self.slots.entry(channel_id) {
                 Entry::Occupied(_) => continue,
                 Entry::Vacant(entry) => {
-                    entry.insert(make_entry(channel_id));
-                    return Ok(());
+                    let (t, u) = make_entry(channel_id)?;
+                    entry.insert(t);
+                    return Ok(u);
                 }
             }
         }
@@ -85,8 +87,9 @@ impl<T> ChannelSlots<T> {
         match self.slots.entry(channel_id) {
             Entry::Occupied(_) => unreachable!("free channel id cannot be occupied"),
             Entry::Vacant(entry) => {
-                entry.insert(make_entry(channel_id));
-                Ok(())
+                let (t, u) = make_entry(channel_id)?;
+                entry.insert(t);
+                Ok(u)
             }
         }
     }
@@ -96,8 +99,8 @@ impl<T> ChannelSlots<T> {
 mod tests {
     use super::*;
 
-    fn id<T>(x: T) -> T {
-        x
+    fn id<T>(x: T) -> Result<(T, ())> {
+        Ok((x, ()))
     }
 
     fn with_channel_max(channel_max: u16) -> ChannelSlots<u16> {

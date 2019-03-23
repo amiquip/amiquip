@@ -3,18 +3,20 @@
 mod auth;
 mod connection_options;
 mod errors;
-mod event_loop;
+//mod event_loop;
+mod channel;
+mod connection;
 mod frame_buffer;
 mod heartbeats;
-mod serialize;
-mod connection;
-mod channel;
 mod io_loop;
+mod serialize;
 
 pub use auth::Auth;
-pub use connection_options::ConnectionOptions;
+pub use channel::Channel;
 pub use connection::Connection;
-pub use errors::{Error, ErrorKind, Result};
+pub use connection_options::ConnectionOptions;
+pub use errors::{ErrorKind, Result};
+pub use errors::ArcError as Error;
 
 pub use amq_protocol::protocol::basic::AMQPProperties as AmqpProperties;
 

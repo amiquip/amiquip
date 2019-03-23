@@ -1,11 +1,12 @@
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
+use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
 use amq_protocol::protocol::{AMQPClass, AMQPHardError};
 use failure::ResultExt;
-use log::error;
+use log::{error, trace};
 
 use super::Inner;
 
@@ -59,6 +60,29 @@ impl ConnectionState {
                 inner.push_method(0, AmqpConnection::Close(close))?;
                 inner.seal_writes();
                 *self = ConnectionState::ClientException;
+            }
+            AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))) => {
+                let slot = inner
+                    .chan_slots
+                    .remove(n)
+                    .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(n))?;
+                slot.tx
+                    .send(AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))))
+                    .context(ErrorKind::EventLoopClientDropped)?;
+            }
+            AMQPFrame::Method(n, method) => {
+                let slot = inner
+                    .chan_slots
+                    .get(n)
+                    .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(n))?;
+                trace!(
+                    "trying to send method to client for channel {}: {:?}",
+                    n,
+                    method
+                );
+                slot.tx
+                    .send(AMQPFrame::Method(n, method))
+                    .context(ErrorKind::EventLoopClientDropped)?;
             }
             _ => panic!("TODO"),
         })

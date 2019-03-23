@@ -29,23 +29,47 @@ macro_rules! impl_try_from_class {
     };
 }
 
-impl_try_from_class!(amq_protocol::protocol::connection::Start,
-                     AMQPClass::Connection, AmqpConnection::Start);
-impl_try_from_class!(amq_protocol::protocol::connection::Secure,
-                     AMQPClass::Connection, AmqpConnection::Secure);
-impl_try_from_class!(amq_protocol::protocol::connection::Tune,
-                     AMQPClass::Connection, AmqpConnection::Tune);
-impl_try_from_class!(amq_protocol::protocol::connection::OpenOk,
-                     AMQPClass::Connection, AmqpConnection::OpenOk);
-impl_try_from_class!(amq_protocol::protocol::connection::Close,
-                     AMQPClass::Connection, AmqpConnection::Close);
-impl_try_from_class!(amq_protocol::protocol::connection::CloseOk,
-                     AMQPClass::Connection, AmqpConnection::CloseOk);
+impl_try_from_class!(
+    amq_protocol::protocol::connection::Start,
+    AMQPClass::Connection,
+    AmqpConnection::Start
+);
+impl_try_from_class!(
+    amq_protocol::protocol::connection::Secure,
+    AMQPClass::Connection,
+    AmqpConnection::Secure
+);
+impl_try_from_class!(
+    amq_protocol::protocol::connection::Tune,
+    AMQPClass::Connection,
+    AmqpConnection::Tune
+);
+impl_try_from_class!(
+    amq_protocol::protocol::connection::OpenOk,
+    AMQPClass::Connection,
+    AmqpConnection::OpenOk
+);
+impl_try_from_class!(
+    amq_protocol::protocol::connection::Close,
+    AMQPClass::Connection,
+    AmqpConnection::Close
+);
+impl_try_from_class!(
+    amq_protocol::protocol::connection::CloseOk,
+    AMQPClass::Connection,
+    AmqpConnection::CloseOk
+);
 
-impl_try_from_class!(amq_protocol::protocol::channel::OpenOk,
-                     AMQPClass::Channel, AmqpChannel::OpenOk);
-impl_try_from_class!(amq_protocol::protocol::channel::CloseOk,
-                     AMQPClass::Channel, AmqpChannel::CloseOk);
+impl_try_from_class!(
+    amq_protocol::protocol::channel::OpenOk,
+    AMQPClass::Channel,
+    AmqpChannel::OpenOk
+);
+impl_try_from_class!(
+    amq_protocol::protocol::channel::CloseOk,
+    AMQPClass::Channel,
+    AmqpChannel::CloseOk
+);
 
 pub(crate) trait TryFromAmqpFrame: Sized {
     fn try_from(channel_id: u16, frame: AMQPFrame) -> Result<Self>;
@@ -89,46 +113,21 @@ impl IntoAmqpClass for AmqpChannel {
 }
 
 #[derive(Clone)]
-pub struct OutputBuffer(Vec<u8>);
+pub(crate) struct OutputBuffer(Vec<u8>);
 
 impl OutputBuffer {
     pub fn with_protocol_header() -> OutputBuffer {
         OutputBuffer(Vec::from("AMQP\x00\x00\x09\x01".as_bytes()))
     }
 
-    pub fn empty() -> OutputBuffer {
+    pub(crate) fn empty() -> OutputBuffer {
         OutputBuffer(Vec::new())
     }
 
-    pub fn with_method<M>(channel_id: u16, method: M) -> Result<OutputBuffer>
-    where
-        M: IntoAmqpClass,
-    {
-        let mut buf = OutputBuffer::empty();
-        buf.push_method(channel_id, method)?;
-        Ok(buf)
-    }
-
-    pub fn with_content_header(
-        channel_id: u16,
-        class_id: u16,
-        length: usize,
-        properties: &AMQPProperties,
-    ) -> Result<OutputBuffer> {
-        let length = length as u64;
-        let mut buf = OutputBuffer::empty();
-        serialize(&mut buf.0, |buf, pos| {
-            gen_content_header_frame((buf, pos), channel_id, class_id, length, properties)
-        })?;
-        Ok(buf)
-    }
-
-    pub fn with_content_body(channel_id: u16, content: &[u8]) -> Result<OutputBuffer> {
-        let mut buf = OutputBuffer::empty();
-        serialize(&mut buf.0, |buf, pos| {
-            gen_content_body_frame((buf, pos), channel_id, content)
-        })?;
-        Ok(buf)
+    pub(crate) fn drain_into_new_buf(&mut self) -> OutputBuffer {
+        let mut buf = OutputBuffer(Vec::with_capacity(self.len()));
+        buf.0.append(&mut self.0);
+        buf
     }
 
     pub fn push_heartbeat(&mut self) {
@@ -145,6 +144,25 @@ impl OutputBuffer {
         let class = method.into_class();
         serialize(&mut self.0, |buf, pos| {
             gen_method_frame((buf, pos), channel_id, &class)
+        })
+    }
+
+    pub(crate) fn push_content_header(
+        &mut self,
+        channel_id: u16,
+        class_id: u16,
+        length: usize,
+        properties: &AMQPProperties,
+    ) -> Result<()> {
+        let length = length as u64;
+        serialize(&mut self.0, |buf, pos| {
+            gen_content_header_frame((buf, pos), channel_id, class_id, length, properties)
+        })
+    }
+
+    pub(crate) fn push_content_body(&mut self, channel_id: u16, content: &[u8]) -> Result<()> {
+        serialize(&mut self.0, |buf, pos| {
+            gen_content_body_frame((buf, pos), channel_id, content)
         })
     }
 

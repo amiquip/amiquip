@@ -117,6 +117,9 @@ pub enum ErrorKind {
     #[fail(display = "internal client exception - received unhandled frames from server")]
     ClientException,
 
+    #[fail(display = "received message for nonexistent channel {}", _0)]
+    ReceivedFrameWithBogusChannelId(u16),
+
     #[fail(display = "I/O thread died unexpectedly: {}", _0)]
     IoThreadPanic(String),
 
