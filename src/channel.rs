@@ -1,43 +1,24 @@
 use crate::io_loop::ChannelHandle;
-use crate::{Consumer, Delivery, Result};
+use crate::{Consumer, Delivery, ErrorKind, Result};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::{AMQPProperties, Ack, Consume, Publish};
 use amq_protocol::types::FieldTable;
 use std::sync::{Arc, Mutex};
 
+#[derive(Clone)]
 pub struct Channel {
     inner: Arc<Mutex<Inner>>,
 }
 
-impl Drop for Channel {
-    fn drop(&mut self) {
-        let _ = self.close_impl();
-    }
-}
-
 impl Channel {
     pub(crate) fn new(handle: ChannelHandle) -> Channel {
-        let inner = Arc::new(Mutex::new(Inner {
-            handle,
-            closed: false,
-        }));
+        let inner = Arc::new(Mutex::new(Inner::new(handle)));
         Channel { inner }
     }
 
-    pub fn close(mut self) -> Result<()> {
-        self.close_impl()
-    }
-
-    fn close_impl(&mut self) -> Result<()> {
+    pub fn close(self) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
-        if inner.closed {
-            return Ok(());
-        }
-        // Go ahead and mark the channel as closed even before we know whether handle.close()
-        // fails. The client can't retry anyway (since close() took ownership of self) and it
-        // prevents drop from trying to close again.
-        inner.closed = true;
-        inner.handle.close()
+        inner.close()
     }
 
     pub fn basic_publish<T: AsRef<[u8]>, S0: Into<String>, S1: Into<String>>(
@@ -50,17 +31,16 @@ impl Channel {
         properties: &AMQPProperties,
     ) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
+        let handle = inner.get_handle_mut()?;
 
-        inner.handle.send_nowait(AmqpBasic::Publish(Publish {
+        handle.send_nowait(AmqpBasic::Publish(Publish {
             ticket: 0,
             exchange: exchange.into(),
             routing_key: routing_key.into(),
             mandatory,
             immediate,
         }))?;
-        inner
-            .handle
-            .send_content(content.as_ref(), Publish::get_class_id(), properties)
+        handle.send_content(content.as_ref(), Publish::get_class_id(), properties)
     }
 
     pub fn basic_consume<S: Into<String>>(
@@ -71,8 +51,9 @@ impl Channel {
         exclusive: bool,
     ) -> Result<Consumer> {
         let mut inner = self.inner.lock().unwrap();
+        let handle = inner.get_handle_mut()?;
 
-        let (tag, rx) = inner.handle.consume(Consume {
+        let (tag, rx) = handle.consume(Consume {
             ticket: 0,
             queue: queue.into(),
             consumer_tag: String::new(),
@@ -87,8 +68,9 @@ impl Channel {
 
     pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
+        let handle = inner.get_handle_mut()?;
 
-        inner.handle.send_nowait(AmqpBasic::Ack(Ack {
+        handle.send_nowait(AmqpBasic::Ack(Ack {
             delivery_tag: delivery.delivery_tag(),
             multiple,
         }))
@@ -98,4 +80,40 @@ impl Channel {
 struct Inner {
     handle: ChannelHandle,
     closed: bool,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        let _ = self.close();
+    }
+}
+
+impl Inner {
+    fn new(handle: ChannelHandle) -> Inner {
+        Inner {
+            handle,
+            closed: false,
+        }
+    }
+
+    fn get_handle_mut(&mut self) -> Result<&mut ChannelHandle> {
+        if self.closed {
+            Err(ErrorKind::ClientClosedChannel)?
+        } else {
+            Ok(&mut self.handle)
+        }
+    }
+
+    fn close(&mut self) -> Result<()> {
+        if self.closed {
+            return Ok(());
+        }
+
+        let result = self.handle.close();
+        // Even if the close call fails, treat ourselves as closed. There's little
+        // hope to recovering from a failed close call, and this prevents us from
+        // attempting to close again when dropped.
+        self.closed = true;
+        result
+    }
 }
