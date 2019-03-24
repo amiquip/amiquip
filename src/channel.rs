@@ -26,13 +26,17 @@ impl Channel {
 
     fn close_impl(&mut self) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
-        Ok(match &mut *inner {
+        match &mut *inner {
             Inner::Open(handle) => {
-                handle.close()?;
+                let result = handle.close();
+                // Go ahead and mark the channel as closed even if we got an error back from
+                // handle.close(). The client can't retry anyway (since close() took ownership
+                // of self) and it prevents drop from trying to close again.
                 *inner = Inner::ClientClosed;
+                result
             }
-            Inner::ClientClosed => (),
-        })
+            Inner::ClientClosed => Ok(()),
+        }
     }
 
     pub fn basic_publish<T: AsRef<[u8]>, S0: Into<String>, S1: Into<String>>(
