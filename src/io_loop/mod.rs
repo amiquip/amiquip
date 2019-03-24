@@ -377,17 +377,17 @@ impl IoLoop {
                 return Ok(());
             }
 
-            // possibly change how we're registered to the socket:
-            // 1. If we had data and now we don't, switch to readable only.
-            // 2. If we didn't have data and now we do, switch to read+write.
-            let have_data_to_write = self.inner.has_data_to_write();
-            if had_data_to_write && !have_data_to_write {
-                trace!("had queued data but now we don't - waiting for socket to be readable");
-                self.poll
-                    .reregister(&self.stream, STREAM, Ready::readable(), PollOpt::edge())
-                    .context(ErrorKind::Io)?;
-            } else if !had_data_to_write && have_data_to_write {
-                trace!("didn't have queued data but now we do - waiting for socket to be readable or writable");
+            // If we have data to write, reregister for readable|writable. This may be a
+            // spurious reregistration, but also may not - if we wrote all the data we have
+            // but didn't get a WouldBlock, and then later in the processing loop added
+            // more data to write but didn't write it, mio won't wake us back up again next
+            // pass unless we reregister.
+            //
+            // If we don't have data to write, only reregister for readable (without
+            // writable) if we had data to write after the last poll; otherwise we know
+            // we were already registered as readable only and don't need to rereg.
+            if self.inner.has_data_to_write() {
+                trace!("ending poll loop with data still to write - reregistering for writable");
                 self.poll
                     .reregister(
                         &self.stream,
@@ -395,6 +395,11 @@ impl IoLoop {
                         Ready::readable() | Ready::writable(),
                         PollOpt::edge(),
                     )
+                    .context(ErrorKind::Io)?;
+            } else if had_data_to_write {
+                trace!("had queued data but now we don't - waiting for socket to be readable");
+                self.poll
+                    .reregister(&self.stream, STREAM, Ready::readable(), PollOpt::edge())
                     .context(ErrorKind::Io)?;
             }
         }
@@ -581,6 +586,7 @@ impl Inner {
             trace!("trying to write {} bytes", len - pos);
             let n = match stream.write(&self.outbuf[pos..]) {
                 Ok(n) => {
+                    trace!("wrote {} bytes", n);
                     self.heartbeats.record_tx_activity();
                     n
                 }
