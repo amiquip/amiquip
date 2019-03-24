@@ -3,7 +3,6 @@
 mod auth;
 mod connection_options;
 mod errors;
-//mod event_loop;
 mod channel;
 mod connection;
 mod frame_buffer;
