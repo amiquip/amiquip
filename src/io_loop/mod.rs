@@ -1,14 +1,12 @@
 use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
-use crate::errors::ArcError;
 use crate::frame_buffer::FrameBuffer;
-use crate::serialize::{
-    IntoAmqpClass, OutputBuffer, SealableOutputBuffer, TryFromAmqpClass, TryFromAmqpFrame,
-};
+use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer, TryFromAmqpClass};
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPProperties;
 use amq_protocol::protocol::connection::TuneOk;
+use amq_protocol::protocol::AMQPClass;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use crossbeam_channel::SendError;
 use crossbeam_channel::Sender as CrossbeamSender;
@@ -40,23 +38,32 @@ use heartbeat_timers::{HeartbeatKind, HeartbeatState, HeartbeatTimers};
 const STREAM: Token = Token(u16::max_value() as usize + 1);
 const HEARTBEAT: Token = Token(u16::max_value() as usize + 2);
 
+#[derive(Debug)]
 enum IoLoopRpc {
     ConnectionClose(OutputBuffer),
     Send(OutputBuffer),
 }
 
+#[derive(Debug)]
 enum IoLoopCommand {
     AllocateChannel(Option<u16>, CrossbeamSender<Result<IoLoopHandle>>),
 }
 
+#[derive(Debug)]
 enum IoLoopMessage {
     Rpc(IoLoopRpc),
     Command(IoLoopCommand),
 }
 
+#[derive(Debug)]
+enum ChannelMessage {
+    ServerClosing(ErrorKind),
+    Method(AMQPClass),
+}
+
 struct ChannelSlot {
     rx: MioReceiver<IoLoopMessage>,
-    tx: CrossbeamSender<AMQPFrame>,
+    tx: CrossbeamSender<ChannelMessage>,
 }
 
 impl ChannelSlot {
@@ -86,7 +93,7 @@ struct IoLoopHandle {
     channel_id: u16,
     buf: OutputBuffer,
     tx: MioSyncSender<IoLoopMessage>,
-    rx: CrossbeamReceiver<AMQPFrame>,
+    rx: CrossbeamReceiver<ChannelMessage>,
     io_loop_result: Arc<Mutex<Option<Result<()>>>>,
 }
 
@@ -98,9 +105,7 @@ impl IoLoopHandle {
     }
 
     fn send_command(&mut self, command: IoLoopCommand) -> Result<()> {
-        self.tx
-            .send(IoLoopMessage::Command(command))
-            .map_err(|_| self.io_loop_error())
+        self.send(IoLoopMessage::Command(command))
     }
 
     fn call<M: IntoAmqpClass, T: TryFromAmqpClass>(&mut self, method: M) -> Result<T> {
@@ -109,11 +114,11 @@ impl IoLoopHandle {
     }
 
     fn call_rpc<T: TryFromAmqpClass>(&mut self, rpc: IoLoopRpc) -> Result<T> {
-        self.tx
-            .send(IoLoopMessage::Rpc(rpc))
-            .map_err(|_| self.io_loop_error())?;
-        let response = self.rx.recv().map_err(|_| self.io_loop_error())?;
-        <T as TryFromAmqpFrame>::try_from(self.channel_id, response)
+        self.send(IoLoopMessage::Rpc(rpc))?;
+        match self.recv()? {
+            ChannelMessage::ServerClosing(err) => Err(err)?,
+            ChannelMessage::Method(method) => T::try_from(method),
+        }
     }
 
     fn send_nowait<M: IntoAmqpClass>(&mut self, method: M) -> Result<()> {
@@ -122,9 +127,7 @@ impl IoLoopHandle {
     }
 
     fn send_rpc_nowait(&mut self, rpc: IoLoopRpc) -> Result<()> {
-        self.tx
-            .send(IoLoopMessage::Rpc(rpc))
-            .map_err(|_| self.io_loop_error())
+        self.send(IoLoopMessage::Rpc(rpc))
     }
 
     fn send_content_header(
@@ -147,12 +150,29 @@ impl IoLoopHandle {
         self.send_rpc_nowait(IoLoopRpc::Send(buf))
     }
 
-    fn io_loop_error(&self) -> ArcError {
-        let result = self.io_loop_result.lock().unwrap();
-        match &*result {
-            Some(Ok(())) | None => ErrorKind::EventLoopDropped.into(),
-            Some(Err(err)) => err.clone(),
-        }
+    fn send(&mut self, message: IoLoopMessage) -> Result<()> {
+        self.tx.send(message).map_err(|_| {
+            // failed to send to the I/O thread; possible causes are:
+            //   1. Server closed channel; we should see if there's a relevant message
+            //      waiting for us on rx.
+            //   2. I/O loop is actually gone - try to get its final error.
+            match self.recv() {
+                Ok(ChannelMessage::ServerClosing(err)) => err.into(),
+                Ok(ChannelMessage::Method(_)) => ErrorKind::FrameUnexpected.into(),
+                Err(err) => err,
+            }
+        })
+    }
+
+    fn recv(&mut self) -> Result<ChannelMessage> {
+        self.rx.recv().map_err(|_| {
+            // failed to recv from the I/O thread; this shouldn't happen unless
+            // it died for some reason, so try to get its final result.
+            match self.io_loop_result() {
+                Some(Ok(())) | None => ErrorKind::EventLoopDropped.into(),
+                Some(Err(err)) => err.clone(),
+            }
+        })
     }
 
     fn io_loop_result(&self) -> Option<Result<()>> {
@@ -400,6 +420,7 @@ impl IoLoop {
 
             let had_data_to_write = self.inner.has_data_to_write();
 
+            trace!("-- processing poll events --");
             for event in events.iter() {
                 handle_event(self, state, event)?;
             }
@@ -531,17 +552,26 @@ impl Inner {
 
     fn process_channel_request(&mut self, channel_id: u16, poll: &Poll) -> Result<()> {
         loop {
-            let slot = self
-                .chan_slots
-                .get(channel_id)
-                .expect("received mio event for channel we deleted - this should be impossible");
-            let command = match slot.rx.try_recv() {
-                Ok(command) => command,
+            let slot = match self.chan_slots.get(channel_id) {
+                Some(slot) => slot,
+                None => {
+                    // We've been asked to poll a receiver for a channel we dropped; this
+                    // is rare, but could happen if (e.g.) the server initiated a Close in this
+                    // same poll processing loop and we already saw it. In that case, we've
+                    // already removed channel_id from chan_slots, but now we've landed in a
+                    // still-pending readable event from poll. Bail out now without an error;
+                    // the dropped channel will propogate an appropriate message back out to
+                    // the channel handle.
+                    return Ok(());
+                }
+            };
+            let message = match slot.rx.try_recv() {
+                Ok(message) => message,
                 Err(TryRecvError::Empty) => return Ok(()),
                 Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
             };
 
-            match command {
+            match message {
                 IoLoopMessage::Rpc(IoLoopRpc::ConnectionClose(buf)) => {
                     self.outbuf.append(buf);
                     self.seal_writes();

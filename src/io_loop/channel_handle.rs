@@ -1,6 +1,6 @@
 use super::{IoLoopCommand, IoLoopHandle, IoLoopRpc};
 use crate::serialize::IntoAmqpClass;
-use crate::Result;
+use crate::{ErrorKind, Result};
 use amq_protocol::protocol::basic::AMQPProperties;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::channel::Close as ChannelClose;
@@ -63,7 +63,10 @@ impl Channel0Handle {
             .send_command(IoLoopCommand::AllocateChannel(channel_id, tx))?;
 
         // double ?? - peel off recv error then channel allocation error
-        let mut handle = rx.recv().map_err(|_| self.handle.io_loop_error())??;
+        let mut handle = rx.recv().map_err(|_| match self.handle.io_loop_result() {
+            Some(Ok(())) | None => ErrorKind::EventLoopDropped.into(),
+            Some(Err(err)) => err,
+        })??;
 
         debug!("opening channel {}", handle.channel_id);
         let out_of_band = String::new();

@@ -1,14 +1,15 @@
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
+use amq_protocol::protocol::channel::CloseOk as ChannelCloseOk;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
 use amq_protocol::protocol::{AMQPClass, AMQPHardError};
 use failure::ResultExt;
-use log::{error, trace};
+use log::{error, trace, warn};
 
-use super::Inner;
+use super::{ChannelMessage, Inner};
 
 #[derive(Debug)]
 pub(super) enum ConnectionState {
@@ -34,16 +35,15 @@ impl ConnectionState {
                 inner.seal_writes();
                 *self = ConnectionState::ServerClosing(close);
             }
-            AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::CloseOk(_))) => {
+            AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::CloseOk(close_ok))) => {
                 inner
                     .chan_slots
                     .get(0)
                     .unwrap() // channel 0 slot always exist if we got to Steady state
                     .tx
-                    .send(AMQPFrame::Method(
-                        0,
-                        AMQPClass::Connection(AmqpConnection::CloseOk(ConnectionCloseOk {})),
-                    ))
+                    .send(ChannelMessage::Method(AMQPClass::Connection(
+                        AmqpConnection::CloseOk(close_ok),
+                    )))
                     .context(ErrorKind::EventLoopClientDropped)?;
                 *self = ConnectionState::ClientClosed;
             }
@@ -61,13 +61,28 @@ impl ConnectionState {
                 inner.seal_writes();
                 *self = ConnectionState::ClientException;
             }
+            AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::Close(close))) => {
+                let slot = inner
+                    .chan_slots
+                    .remove(n)
+                    .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(n))?;
+                warn!("server closing channel {}: {:?}", n, close);
+                inner.push_method(n, AmqpChannel::CloseOk(ChannelCloseOk {}))?;
+                slot.tx
+                    .send(ChannelMessage::ServerClosing(
+                        ErrorKind::ServerClosedChannel(n, close.reply_code, close.reply_text),
+                    ))
+                    .context(ErrorKind::EventLoopClientDropped)?;
+            }
             AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))) => {
                 let slot = inner
                     .chan_slots
                     .remove(n)
                     .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(n))?;
                 slot.tx
-                    .send(AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))))
+                    .send(ChannelMessage::Method(AMQPClass::Channel(
+                        AmqpChannel::CloseOk(close_ok),
+                    )))
                     .context(ErrorKind::EventLoopClientDropped)?;
             }
             AMQPFrame::Method(n, method) => {
@@ -81,7 +96,7 @@ impl ConnectionState {
                     method
                 );
                 slot.tx
-                    .send(AMQPFrame::Method(n, method))
+                    .send(ChannelMessage::Method(method))
                     .context(ErrorKind::EventLoopClientDropped)?;
             }
             _ => panic!("TODO"),

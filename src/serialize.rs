@@ -112,6 +112,7 @@ impl IntoAmqpClass for AmqpChannel {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct OutputBuffer(Vec<u8>);
 
 impl OutputBuffer {
@@ -207,10 +208,7 @@ pub(super) struct SealableOutputBuffer {
 
 impl SealableOutputBuffer {
     pub(super) fn new(buf: OutputBuffer) -> SealableOutputBuffer {
-        SealableOutputBuffer  {
-            buf,
-            sealed: false,
-        }
+        SealableOutputBuffer { buf, sealed: false }
     }
 
     #[inline]
