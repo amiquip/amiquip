@@ -7,6 +7,7 @@ use crate::serialize::{
 };
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
+use amq_protocol::protocol::basic::AMQPProperties;
 use amq_protocol::protocol::connection::TuneOk;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use crossbeam_channel::SendError;
@@ -41,7 +42,7 @@ const HEARTBEAT: Token = Token(u16::max_value() as usize + 2);
 
 enum IoLoopRpc {
     ConnectionClose(OutputBuffer),
-    Call(OutputBuffer),
+    Send(OutputBuffer),
 }
 
 enum IoLoopCommand {
@@ -104,7 +105,7 @@ impl IoLoopHandle {
 
     fn call<M: IntoAmqpClass, T: TryFromAmqpClass>(&mut self, method: M) -> Result<T> {
         let buf = self.make_buf(method)?;
-        self.call_rpc(IoLoopRpc::Call(buf))
+        self.call_rpc(IoLoopRpc::Send(buf))
     }
 
     fn call_rpc<T: TryFromAmqpClass>(&mut self, rpc: IoLoopRpc) -> Result<T> {
@@ -113,6 +114,37 @@ impl IoLoopHandle {
             .map_err(|_| self.io_loop_error())?;
         let response = self.rx.recv().map_err(|_| self.io_loop_error())?;
         <T as TryFromAmqpFrame>::try_from(self.channel_id, response)
+    }
+
+    fn send_nowait<M: IntoAmqpClass>(&mut self, method: M) -> Result<()> {
+        let buf = self.make_buf(method)?;
+        self.send_rpc_nowait(IoLoopRpc::Send(buf))
+    }
+
+    fn send_rpc_nowait(&mut self, rpc: IoLoopRpc) -> Result<()> {
+        self.tx
+            .send(IoLoopMessage::Rpc(rpc))
+            .map_err(|_| self.io_loop_error())
+    }
+
+    fn send_content_header(
+        &mut self,
+        class_id: u16,
+        len: usize,
+        properties: &AMQPProperties,
+    ) -> Result<()> {
+        debug_assert!(self.buf.is_empty());
+        self.buf
+            .push_content_header(self.channel_id, class_id, len, properties)?;
+        let buf = self.buf.drain_into_new_buf();
+        self.send_rpc_nowait(IoLoopRpc::Send(buf))
+    }
+
+    fn send_content_body(&mut self, content: &[u8]) -> Result<()> {
+        debug_assert!(self.buf.is_empty());
+        self.buf.push_content_body(self.channel_id, content)?;
+        let buf = self.buf.drain_into_new_buf();
+        self.send_rpc_nowait(IoLoopRpc::Send(buf))
     }
 
     fn io_loop_error(&self) -> ArcError {
@@ -189,7 +221,7 @@ impl IoLoop {
             .context(ErrorKind::ForkFailed)?;
 
         match handshake_done_rx.recv() {
-            Ok(()) => Ok((join_handle, Channel0Handle::new(ch0_handle))),
+            Ok(frame_max) => Ok((join_handle, Channel0Handle::new(ch0_handle, frame_max))),
             Err(_) => {
                 let result = match join_handle.join() {
                     Ok(()) => ch0_handle.io_loop_result().unwrap(),
@@ -207,7 +239,7 @@ impl IoLoop {
     fn thread_main<Auth: Sasl>(
         mut self,
         options: ConnectionOptions<Auth>,
-        handshake_done_tx: crossbeam_channel::Sender<()>,
+        handshake_done_tx: crossbeam_channel::Sender<usize>,
         ch0_slot: ChannelSlot,
     ) -> Result<()> {
         self.poll
@@ -215,12 +247,11 @@ impl IoLoop {
             .context(ErrorKind::Io)?;
         let tune_ok = self.run_handshake(options)?;
         let channel_max = tune_ok.channel_max;
-        match handshake_done_tx.send(()) {
+        match handshake_done_tx.send(tune_ok.frame_max as usize) {
             Ok(_) => (),
             Err(_) => return Ok(()),
         }
         self.inner.chan_slots.set_channel_max(channel_max);
-        self.inner.frame_max = tune_ok.frame_max as usize;
         self.inner
             .chan_slots
             .insert(Some(0), |_| Ok((ch0_slot, ())))?;
@@ -418,9 +449,6 @@ struct Inner {
     // Slots for open channels. Channel 0 should be here once handshake is done.
     chan_slots: ChannelSlots<ChannelSlot>,
 
-    // Frame size (negotiated during handshake).
-    frame_max: usize,
-
     // Bound for in-memory channels that send to our I/O thread. (Channels going _from_
     // the I/O thread are unbounded to prevent blocking the I/O thread on slow receviers.)
     mio_channel_bound: usize,
@@ -435,7 +463,6 @@ impl Inner {
             outbuf: SealableOutputBuffer::new(OutputBuffer::with_protocol_header()),
             heartbeats,
             chan_slots: ChannelSlots::new(),
-            frame_max: 0,
             mio_channel_bound,
             io_loop_result: Arc::default(),
         }
@@ -519,7 +546,7 @@ impl Inner {
                     self.outbuf.append(buf);
                     self.seal_writes();
                 }
-                IoLoopMessage::Rpc(IoLoopRpc::Call(buf)) => {
+                IoLoopMessage::Rpc(IoLoopRpc::Send(buf)) => {
                     self.outbuf.append(buf);
                 }
                 IoLoopMessage::Command(IoLoopCommand::AllocateChannel(channel_id, tx)) => {

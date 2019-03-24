@@ -1,5 +1,7 @@
 use crate::io_loop::ChannelHandle;
 use crate::Result;
+use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
+use amq_protocol::protocol::basic::{AMQPProperties, Publish};
 use std::sync::{Arc, Mutex};
 
 pub struct Channel {
@@ -27,16 +29,42 @@ impl Channel {
         Ok(match &mut *inner {
             Inner::Open(handle) => {
                 handle.close()?;
-                *inner = Inner::Closed;
+                *inner = Inner::ClientClosed;
             }
-            Inner::Closed => (),
+            Inner::ClientClosed => (),
         })
+    }
+
+    pub fn basic_publish<T: AsRef<[u8]>, S0: Into<String>, S1: Into<String>>(
+        &self,
+        content: T,
+        exchange: S0,
+        routing_key: S1,
+        mandatory: bool,
+        immediate: bool,
+        properties: &AMQPProperties,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+
+        match &mut *inner {
+            Inner::Open(handle) => {
+                handle.send_nowait(AmqpBasic::Publish(Publish {
+                    ticket: 0,
+                    exchange: exchange.into(),
+                    routing_key: routing_key.into(),
+                    mandatory,
+                    immediate,
+                }))?;
+                handle.send_content(content.as_ref(), Publish::get_class_id(), properties)
+            }
+            Inner::ClientClosed => unreachable!("close consumes self; cannot call publish"),
+        }
     }
 }
 
 enum Inner {
     Open(ChannelHandle),
-    Closed,
+    ClientClosed,
 }
 
 /*
