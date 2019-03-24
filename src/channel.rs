@@ -16,7 +16,10 @@ impl Drop for Channel {
 
 impl Channel {
     pub(crate) fn new(handle: ChannelHandle) -> Channel {
-        let inner = Arc::new(Mutex::new(Inner::Open(handle)));
+        let inner = Arc::new(Mutex::new(Inner {
+            handle,
+            closed: false,
+        }));
         Channel { inner }
     }
 
@@ -26,17 +29,14 @@ impl Channel {
 
     fn close_impl(&mut self) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
-        match &mut *inner {
-            Inner::Open(handle) => {
-                let result = handle.close();
-                // Go ahead and mark the channel as closed even if we got an error back from
-                // handle.close(). The client can't retry anyway (since close() took ownership
-                // of self) and it prevents drop from trying to close again.
-                *inner = Inner::ClientClosed;
-                result
-            }
-            Inner::ClientClosed => Ok(()),
+        if inner.closed {
+            return Ok(());
         }
+        // Go ahead and mark the channel as closed even before we know whether handle.close()
+        // fails. The client can't retry anyway (since close() took ownership of self) and it
+        // prevents drop from trying to close again.
+        inner.closed = true;
+        inner.handle.close()
     }
 
     pub fn basic_publish<T: AsRef<[u8]>, S0: Into<String>, S1: Into<String>>(
@@ -50,23 +50,20 @@ impl Channel {
     ) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
 
-        match &mut *inner {
-            Inner::Open(handle) => {
-                handle.send_nowait(AmqpBasic::Publish(Publish {
-                    ticket: 0,
-                    exchange: exchange.into(),
-                    routing_key: routing_key.into(),
-                    mandatory,
-                    immediate,
-                }))?;
-                handle.send_content(content.as_ref(), Publish::get_class_id(), properties)
-            }
-            Inner::ClientClosed => unreachable!("close consumes self; cannot call publish"),
-        }
+        inner.handle.send_nowait(AmqpBasic::Publish(Publish {
+            ticket: 0,
+            exchange: exchange.into(),
+            routing_key: routing_key.into(),
+            mandatory,
+            immediate,
+        }))?;
+        inner
+            .handle
+            .send_content(content.as_ref(), Publish::get_class_id(), properties)
     }
 }
 
-enum Inner {
-    Open(ChannelHandle),
-    ClientClosed,
+struct Inner {
+    handle: ChannelHandle,
+    closed: bool,
 }
