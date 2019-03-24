@@ -1,10 +1,12 @@
 #![allow(dead_code)]
 
 mod auth;
-mod connection_options;
-mod errors;
 mod channel;
 mod connection;
+mod connection_options;
+mod consumer;
+mod delivery;
+mod errors;
 mod frame_buffer;
 mod heartbeats;
 mod io_loop;
@@ -14,8 +16,10 @@ pub use auth::Auth;
 pub use channel::Channel;
 pub use connection::Connection;
 pub use connection_options::ConnectionOptions;
-pub use errors::{ErrorKind, Result};
+pub use consumer::Consumer;
+pub use delivery::Delivery;
 pub use errors::ArcError as Error;
+pub use errors::{ErrorKind, Result};
 
 pub use amq_protocol::protocol::basic::AMQPProperties as AmqpProperties;
 

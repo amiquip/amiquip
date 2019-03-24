@@ -123,6 +123,12 @@ pub enum ErrorKind {
     #[fail(display = "I/O thread died unexpectedly: {}", _0)]
     IoThreadPanic(String),
 
+    #[fail(display = "server sent duplicate consumer tag for channel {}: {}", _0, _1)]
+    DuplicateConsumerTag(u16, String),
+
+    #[fail(display = "received delivery with unknown consumer tag for channel {}: {}", _0, _1)]
+    UnknownConsumerTag(u16, String),
+
     #[doc(hidden)]
     #[fail(display = "invalid error case")]
     __Nonexhaustive,

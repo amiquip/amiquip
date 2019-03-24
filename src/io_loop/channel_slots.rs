@@ -31,6 +31,10 @@ impl<T> ChannelSlots<T> {
         self.slots.get(&channel_id)
     }
 
+    pub(crate) fn get_mut(&mut self, channel_id: u16) -> Option<&mut T> {
+        self.slots.get_mut(&channel_id)
+    }
+
     pub(crate) fn insert<F, U>(&mut self, channel_id: Option<u16>, make_entry: F) -> Result<U>
     where
         F: FnOnce(u16) -> Result<(T, U)>,

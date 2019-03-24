@@ -2,9 +2,10 @@ use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer, TryFromAmqpClass};
-use crate::{ErrorKind, Result};
+use crate::{Delivery, ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
-use amq_protocol::protocol::basic::AMQPProperties;
+use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
+use amq_protocol::protocol::basic::{AMQPProperties, Consume};
 use amq_protocol::protocol::connection::TuneOk;
 use amq_protocol::protocol::AMQPClass;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
@@ -17,6 +18,7 @@ use mio::{Event, Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::sync_channel as mio_sync_channel;
 use mio_extras::channel::Receiver as MioReceiver;
 use mio_extras::channel::SyncSender as MioSyncSender;
+use std::collections::hash_map::HashMap;
 use std::io;
 use std::sync::mpsc::TryRecvError;
 use std::sync::{Arc, Mutex};
@@ -26,12 +28,14 @@ use std::time::Duration;
 mod channel_handle;
 mod channel_slots;
 mod connection_state;
+mod delivery_collector;
 mod handshake_state;
 mod heartbeat_timers;
 
 pub(crate) use channel_handle::{Channel0Handle, ChannelHandle};
 use channel_slots::ChannelSlots;
 use connection_state::ConnectionState;
+use delivery_collector::DeliveryCollector;
 use handshake_state::HandshakeState;
 use heartbeat_timers::{HeartbeatKind, HeartbeatState, HeartbeatTimers};
 
@@ -58,12 +62,15 @@ enum IoLoopMessage {
 #[derive(Debug)]
 enum ChannelMessage {
     ServerClosing(ErrorKind),
+    ConsumeOk(String, CrossbeamReceiver<Delivery>),
     Method(AMQPClass),
 }
 
 struct ChannelSlot {
     rx: MioReceiver<IoLoopMessage>,
     tx: CrossbeamSender<ChannelMessage>,
+    collector: DeliveryCollector,
+    consumers: HashMap<String, CrossbeamSender<Delivery>>,
 }
 
 impl ChannelSlot {
@@ -75,7 +82,12 @@ impl ChannelSlot {
         let (mio_tx, mio_rx) = mio_sync_channel(mio_channel_bound);
         let (tx, rx) = crossbeam_channel::unbounded();
 
-        let channel_slot = ChannelSlot { rx: mio_rx, tx };
+        let channel_slot = ChannelSlot {
+            rx: mio_rx,
+            tx,
+            collector: DeliveryCollector::new(),
+            consumers: HashMap::new(),
+        };
 
         let loop_handle = IoLoopHandle {
             channel_id,
@@ -108,6 +120,16 @@ impl IoLoopHandle {
         self.send(IoLoopMessage::Command(command))
     }
 
+    fn consume(&mut self, consume: Consume) -> Result<(String, CrossbeamReceiver<Delivery>)> {
+        let buf = self.make_buf(AmqpBasic::Consume(consume))?;
+        self.send(IoLoopMessage::Rpc(IoLoopRpc::Send(buf)))?;
+        match self.recv()? {
+            ChannelMessage::ConsumeOk(tag, rx) => Ok((tag, rx)),
+            ChannelMessage::Method(_) => Err(ErrorKind::FrameUnexpected)?,
+            ChannelMessage::ServerClosing(err) => Err(err)?,
+        }
+    }
+
     fn call<M: IntoAmqpClass, T: TryFromAmqpClass>(&mut self, method: M) -> Result<T> {
         let buf = self.make_buf(method)?;
         self.call_rpc(IoLoopRpc::Send(buf))
@@ -116,8 +138,9 @@ impl IoLoopHandle {
     fn call_rpc<T: TryFromAmqpClass>(&mut self, rpc: IoLoopRpc) -> Result<T> {
         self.send(IoLoopMessage::Rpc(rpc))?;
         match self.recv()? {
-            ChannelMessage::ServerClosing(err) => Err(err)?,
             ChannelMessage::Method(method) => T::try_from(method),
+            ChannelMessage::ServerClosing(err) => Err(err)?,
+            ChannelMessage::ConsumeOk(_, _) => Err(ErrorKind::FrameUnexpected)?,
         }
     }
 
@@ -158,7 +181,9 @@ impl IoLoopHandle {
             //   2. I/O loop is actually gone - try to get its final error.
             match self.recv() {
                 Ok(ChannelMessage::ServerClosing(err)) => err.into(),
-                Ok(ChannelMessage::Method(_)) => ErrorKind::FrameUnexpected.into(),
+                Ok(ChannelMessage::Method(_)) | Ok(ChannelMessage::ConsumeOk(_, _)) => {
+                    ErrorKind::FrameUnexpected.into()
+                }
                 Err(err) => err,
             }
         })

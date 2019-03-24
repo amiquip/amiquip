@@ -1,7 +1,7 @@
-use super::{IoLoopCommand, IoLoopHandle, IoLoopRpc};
-use crate::serialize::IntoAmqpClass;
-use crate::{ErrorKind, Result};
-use amq_protocol::protocol::basic::AMQPProperties;
+use super::{CrossbeamReceiver, IoLoopCommand, IoLoopHandle, IoLoopRpc};
+use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
+use crate::{Delivery, ErrorKind, Result};
+use amq_protocol::protocol::basic::{AMQPProperties, Consume};
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::channel::Close as ChannelClose;
 use amq_protocol::protocol::channel::CloseOk as ChannelCloseOk;
@@ -98,6 +98,30 @@ impl ChannelHandle {
         let close_ok = self.handle.call::<_, ChannelCloseOk>(close)?;
         trace!("got close-ok: {:?}", close_ok);
         Ok(())
+    }
+
+    pub(crate) fn consume(
+        &mut self,
+        consume: Consume,
+    ) -> Result<(String, CrossbeamReceiver<Delivery>)> {
+        trace!(
+            "starting consumer on channel {}: {:?}",
+            self.handle.channel_id,
+            consume
+        );
+        self.handle.consume(consume)
+    }
+
+    pub(crate) fn call<M: IntoAmqpClass + Debug, T: TryFromAmqpClass>(
+        &mut self,
+        method: M,
+    ) -> Result<T> {
+        trace!(
+            "calling rpc method on channel {}: {:?}",
+            self.handle.channel_id,
+            method
+        );
+        self.handle.call(method)
     }
 
     pub(crate) fn send_nowait<M: IntoAmqpClass + Debug>(&mut self, method: M) -> Result<()> {

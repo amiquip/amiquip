@@ -1,7 +1,8 @@
 use crate::io_loop::ChannelHandle;
-use crate::Result;
+use crate::{Consumer, Result};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
-use amq_protocol::protocol::basic::{AMQPProperties, Publish};
+use amq_protocol::protocol::basic::{AMQPProperties, Consume, Publish};
+use amq_protocol::types::FieldTable;
 use std::sync::{Arc, Mutex};
 
 pub struct Channel {
@@ -60,6 +61,28 @@ impl Channel {
         inner
             .handle
             .send_content(content.as_ref(), Publish::get_class_id(), properties)
+    }
+
+    pub fn basic_consume<S: Into<String>>(
+        &self,
+        queue: S,
+        no_local: bool,
+        no_ack: bool,
+        exclusive: bool,
+    ) -> Result<Consumer> {
+        let mut inner = self.inner.lock().unwrap();
+
+        let (tag, rx) = inner.handle.consume(Consume {
+            ticket: 0,
+            queue: queue.into(),
+            consumer_tag: String::new(),
+            no_local,
+            no_ack,
+            exclusive,
+            nowait: false,                // TODO should we support this?
+            arguments: FieldTable::new(), // TODO anything to put here?
+        })?;
+        Ok(Consumer::new(tag, rx))
     }
 }
 
