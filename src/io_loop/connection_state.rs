@@ -1,6 +1,7 @@
 use crate::{ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
+use amq_protocol::protocol::basic::CancelOk;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::channel::CloseOk as ChannelCloseOk;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
@@ -12,7 +13,7 @@ use failure::ResultExt;
 use log::{error, trace, warn};
 use std::collections::hash_map::Entry;
 
-use super::{ChannelMessage, ChannelSlot, Inner};
+use super::{ChannelMessage, ChannelSlot, ConsumerMessage, Inner};
 
 #[derive(Debug)]
 pub(super) enum ConnectionState {
@@ -64,7 +65,15 @@ impl ConnectionState {
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
                 inner.push_method(0, AmqpConnection::CloseOk(ConnectionCloseOk {}))?;
                 inner.seal_writes();
+                let err =
+                    ErrorKind::ServerClosedConnection(close.reply_code, close.reply_text.clone());
                 *self = ConnectionState::ServerClosing(close);
+
+                for (_, mut slot) in inner.chan_slots.drain() {
+                    for (_, tx) in slot.consumers.drain() {
+                        send(&tx, ConsumerMessage::ServerClosedConnection(err.clone()))?;
+                    }
+                }
             }
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::CloseOk(close_ok))) => {
                 inner
@@ -77,6 +86,12 @@ impl ConnectionState {
                     )))
                     .context(ErrorKind::EventLoopClientDropped)?;
                 *self = ConnectionState::ClientClosed;
+
+                for (_, mut slot) in inner.chan_slots.drain() {
+                    for (_, tx) in slot.consumers.drain() {
+                        send(&tx, ConsumerMessage::ClientClosedConnection)?;
+                    }
+                }
             }
             // TODO handle other expected channel 0 methods
             AMQPFrame::Method(0, other) => {
@@ -106,24 +121,24 @@ impl ConnectionState {
                 *self = ConnectionState::ClientException;
             }
             AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::Close(close))) => {
-                let slot = slot_remove(inner, n)?;
                 warn!("server closing channel {}: {:?}", n, close);
+                let mut slot = slot_remove(inner, n)?;
+                let err = ErrorKind::ServerClosedChannel(n, close.reply_code, close.reply_text);
+                send(&slot.tx, ChannelMessage::ServerClosing(err.clone()))?;
+                for (_, tx) in slot.consumers.drain() {
+                    send(&tx, ConsumerMessage::ServerClosedChannel(err.clone()))?;
+                }
                 inner.push_method(n, AmqpChannel::CloseOk(ChannelCloseOk {}))?;
-                send(
-                    &slot.tx,
-                    ChannelMessage::ServerClosing(ErrorKind::ServerClosedChannel(
-                        n,
-                        close.reply_code,
-                        close.reply_text,
-                    )),
-                )?;
             }
             AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))) => {
-                let slot = slot_remove(inner, n)?;
+                let mut slot = slot_remove(inner, n)?;
                 send(
                     &slot.tx,
                     ChannelMessage::Method(AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))),
                 )?;
+                for (_, tx) in slot.consumers.drain() {
+                    send(&tx, ConsumerMessage::ClientClosedChannel)?;
+                }
             }
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::ConsumeOk(consume_ok))) => {
                 let consumer_tag = consume_ok.consumer_tag;
@@ -135,6 +150,32 @@ impl ConnectionState {
                         entry.insert(tx);
                         send(&slot.tx, ChannelMessage::ConsumeOk(consumer_tag, rx))?;
                     }
+                }
+            }
+            AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::Cancel(cancel))) => {
+                let consumer_tag = cancel.consumer_tag;
+                let slot = slot_get_mut(inner, n)?;
+                if let Some(tx) = slot.consumers.remove(&consumer_tag) {
+                    send(&tx, ConsumerMessage::Cancelled)?;
+                }
+                if !cancel.nowait {
+                    inner.push_method(
+                        n,
+                        AmqpBasic::CancelOk(CancelOk {
+                            consumer_tag: consumer_tag,
+                        }),
+                    )?;
+                }
+            }
+            AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::CancelOk(cancel_ok))) => {
+                let slot = slot_get_mut(inner, n)?;
+                let consumer = slot.consumers.remove(&cancel_ok.consumer_tag);
+                send(
+                    &slot.tx,
+                    ChannelMessage::Method(AMQPClass::Basic(AmqpBasic::CancelOk(cancel_ok))),
+                )?;
+                if let Some(tx) = consumer {
+                    send(&tx, ConsumerMessage::Cancelled)?;
                 }
             }
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::Deliver(deliver))) => {
@@ -161,7 +202,7 @@ impl ConnectionState {
                         .consumers
                         .get(&consumer_tag)
                         .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
-                    send(tx, delivery)?;
+                    send(tx, ConsumerMessage::Delivery(delivery))?;
                 }
             }
             _ => panic!("TODO"),

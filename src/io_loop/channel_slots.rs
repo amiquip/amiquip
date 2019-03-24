@@ -1,6 +1,6 @@
 use crate::{ErrorKind, Result};
 use indexmap::IndexSet;
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::hash_map::{Entry, HashMap, Drain};
 
 pub(crate) struct ChannelSlots<T> {
     slots: HashMap<u16, T>,
@@ -17,6 +17,13 @@ impl<T> ChannelSlots<T> {
             next_channel_id: 1,
             channel_max: 0,
         }
+    }
+
+    pub(crate) fn drain(&mut self) -> Drain<u16, T> {
+        for (id, _) in self.slots.iter() {
+            self.freed_channel_ids.insert(*id);
+        }
+        self.slots.drain()
     }
 
     pub(crate) fn set_channel_max(&mut self, channel_max: u16) {

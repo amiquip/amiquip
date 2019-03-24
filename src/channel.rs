@@ -1,8 +1,9 @@
 use crate::io_loop::ChannelHandle;
 use crate::{Consumer, Delivery, ErrorKind, Result};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
-use amq_protocol::protocol::basic::{AMQPProperties, Ack, Consume, Publish};
+use amq_protocol::protocol::basic::{AMQPProperties, Ack, Cancel, CancelOk, Consume, Publish};
 use amq_protocol::types::FieldTable;
+use log::{debug, trace};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -74,6 +75,19 @@ impl Channel {
             delivery_tag: delivery.delivery_tag(),
             multiple,
         }))
+    }
+
+    pub fn basic_cancel(&self, consumer: &Consumer) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        let handle = inner.get_handle_mut()?;
+
+        debug!("cancelling consumer {}", consumer.consumer_tag());
+        let cancel_ok = handle.call::<_, CancelOk>(AmqpBasic::Cancel(Cancel {
+            consumer_tag: consumer.consumer_tag().to_string(),
+            nowait: false,
+        }))?;
+        trace!("got cancel-ok {:?}", cancel_ok);
+        Ok(())
     }
 }
 

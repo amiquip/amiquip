@@ -2,7 +2,7 @@ use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer, TryFromAmqpClass};
-use crate::{Delivery, ErrorKind, Result};
+use crate::{ConsumerMessage, ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::{AMQPProperties, Consume};
@@ -62,7 +62,7 @@ enum IoLoopMessage {
 #[derive(Debug)]
 enum ChannelMessage {
     ServerClosing(ErrorKind),
-    ConsumeOk(String, CrossbeamReceiver<Delivery>),
+    ConsumeOk(String, CrossbeamReceiver<ConsumerMessage>),
     Method(AMQPClass),
 }
 
@@ -70,7 +70,7 @@ struct ChannelSlot {
     rx: MioReceiver<IoLoopMessage>,
     tx: CrossbeamSender<ChannelMessage>,
     collector: DeliveryCollector,
-    consumers: HashMap<String, CrossbeamSender<Delivery>>,
+    consumers: HashMap<String, CrossbeamSender<ConsumerMessage>>,
 }
 
 impl ChannelSlot {
@@ -120,7 +120,10 @@ impl IoLoopHandle {
         self.send(IoLoopMessage::Command(command))
     }
 
-    fn consume(&mut self, consume: Consume) -> Result<(String, CrossbeamReceiver<Delivery>)> {
+    fn consume(
+        &mut self,
+        consume: Consume,
+    ) -> Result<(String, CrossbeamReceiver<ConsumerMessage>)> {
         let buf = self.make_buf(AmqpBasic::Consume(consume))?;
         self.send(IoLoopMessage::Rpc(IoLoopRpc::Send(buf)))?;
         match self.recv()? {

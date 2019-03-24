@@ -1,6 +1,6 @@
 use amq_protocol::protocol::basic::Deliver;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Delivery {
     delivery_tag: u64,
     redelivered: bool,

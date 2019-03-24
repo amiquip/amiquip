@@ -16,7 +16,7 @@ pub use auth::Auth;
 pub use channel::Channel;
 pub use connection::Connection;
 pub use connection_options::ConnectionOptions;
-pub use consumer::Consumer;
+pub use consumer::{Consumer, ConsumerMessage};
 pub use delivery::Delivery;
 pub use errors::ArcError as Error;
 pub use errors::{ErrorKind, Result};

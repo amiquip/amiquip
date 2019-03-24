@@ -1,6 +1,6 @@
-use super::{CrossbeamReceiver, IoLoopCommand, IoLoopHandle, IoLoopRpc};
+use super::{ConsumerMessage, CrossbeamReceiver, IoLoopCommand, IoLoopHandle, IoLoopRpc};
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
-use crate::{Delivery, ErrorKind, Result};
+use crate::{ErrorKind, Result};
 use amq_protocol::protocol::basic::{AMQPProperties, Consume};
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::channel::Close as ChannelClose;
@@ -103,7 +103,7 @@ impl ChannelHandle {
     pub(crate) fn consume(
         &mut self,
         consume: Consume,
-    ) -> Result<(String, CrossbeamReceiver<Delivery>)> {
+    ) -> Result<(String, CrossbeamReceiver<ConsumerMessage>)> {
         trace!(
             "starting consumer on channel {}: {:?}",
             self.handle.channel_id,

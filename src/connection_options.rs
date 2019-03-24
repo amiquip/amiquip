@@ -115,6 +115,15 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
                 crate::built_info::BUILT_TIME_UTC
             )),
         );
+        let mut capabilities = FieldTable::new();
+        capabilities.insert(
+            "consumer_cancel_notify".to_string(),
+            AMQPValue::Boolean(true),
+        );
+        client_properties.insert(
+            "capabilities".to_string(),
+            AMQPValue::FieldTable(capabilities),
+        );
 
         Ok(StartOk {
             client_properties,
