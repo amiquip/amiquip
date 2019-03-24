@@ -22,4 +22,8 @@ impl Delivery {
             },
         )
     }
+
+    pub fn delivery_tag(&self) -> u64 {
+        self.delivery_tag
+    }
 }

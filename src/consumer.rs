@@ -11,6 +11,10 @@ impl Consumer {
         Consumer { consumer_tag, rx }
     }
 
+    pub fn consumer_tag(&self) -> &str {
+        &self.consumer_tag
+    }
+
     pub fn receiver(&self) -> &Receiver<Delivery> {
         &self.rx
     }

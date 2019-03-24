@@ -1,7 +1,7 @@
 use crate::io_loop::ChannelHandle;
-use crate::{Consumer, Result};
+use crate::{Consumer, Delivery, Result};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
-use amq_protocol::protocol::basic::{AMQPProperties, Consume, Publish};
+use amq_protocol::protocol::basic::{AMQPProperties, Ack, Consume, Publish};
 use amq_protocol::types::FieldTable;
 use std::sync::{Arc, Mutex};
 
@@ -83,6 +83,15 @@ impl Channel {
             arguments: FieldTable::new(), // TODO anything to put here?
         })?;
         Ok(Consumer::new(tag, rx))
+    }
+
+    pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+
+        inner.handle.send_nowait(AmqpBasic::Ack(Ack {
+            delivery_tag: delivery.delivery_tag(),
+            multiple,
+        }))
     }
 }
 
