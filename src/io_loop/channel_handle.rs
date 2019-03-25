@@ -1,4 +1,7 @@
-use super::{ConsumerMessage, CrossbeamReceiver, IoLoopCommand, IoLoopHandle, IoLoopRpc};
+use super::{
+    ConnectionBlockedNotification, ConsumerMessage, CrossbeamReceiver, IoLoopCommand, IoLoopHandle,
+    IoLoopHandle0, IoLoopRpc,
+};
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
 use crate::{Error, ErrorKind, Result};
 use amq_protocol::protocol::basic::{AMQPProperties, Consume};
@@ -11,6 +14,7 @@ use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
 use amq_protocol::protocol::constants::REPLY_SUCCESS;
+use crossbeam_channel::Receiver;
 use log::{debug, trace};
 use std::fmt::Debug;
 
@@ -20,12 +24,12 @@ use std::fmt::Debug;
 const FRAME_OVERHEAD: usize = 8;
 
 pub(crate) struct Channel0Handle {
-    handle: IoLoopHandle,
+    handle: IoLoopHandle0,
     frame_max: usize,
 }
 
 impl Channel0Handle {
-    pub(super) fn new(handle: IoLoopHandle, mut frame_max: usize) -> Channel0Handle {
+    pub(super) fn new(handle: IoLoopHandle0, mut frame_max: usize) -> Channel0Handle {
         assert!(
             handle.channel_id == 0,
             "handle for Channel0 must be channel 0"
@@ -35,6 +39,10 @@ impl Channel0Handle {
         }
         frame_max -= FRAME_OVERHEAD;
         Channel0Handle { handle, frame_max }
+    }
+
+    pub(crate) fn blocked_notifications(&self) -> &Receiver<ConnectionBlockedNotification> {
+        &self.handle.blocked_rx
     }
 
     pub(crate) fn close_connection(&mut self) -> Result<()> {

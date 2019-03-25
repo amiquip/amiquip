@@ -20,6 +20,7 @@ use mio_extras::channel::Receiver as MioReceiver;
 use mio_extras::channel::SyncSender as MioSyncSender;
 use std::collections::hash_map::HashMap;
 use std::io;
+use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::TryRecvError;
 use std::thread::{Builder, JoinHandle};
 use std::time::Duration;
@@ -91,6 +92,35 @@ impl ChannelSlot {
         };
 
         (channel_slot, loop_handle)
+    }
+}
+
+#[derive(Debug)]
+pub enum ConnectionBlockedNotification {
+    Blocked(String),
+    Unblocked,
+}
+
+struct Channel0Slot {
+    common: ChannelSlot,
+    blocked_tx: CrossbeamSender<ConnectionBlockedNotification>,
+}
+
+impl Channel0Slot {
+    fn new(mio_channel_bound: usize) -> (Channel0Slot, IoLoopHandle0) {
+        let (common_slot, common_handle) = ChannelSlot::new(mio_channel_bound, 0);
+        let (blocked_tx, blocked_rx) = crossbeam_channel::unbounded();
+
+        let slot = Channel0Slot {
+            common: common_slot,
+            blocked_tx,
+        };
+        let handle = IoLoopHandle0 {
+            common: common_handle,
+            blocked_rx,
+        };
+
+        (slot, handle)
     }
 }
 
@@ -194,6 +224,25 @@ impl IoLoopHandle {
     }
 }
 
+struct IoLoopHandle0 {
+    common: IoLoopHandle,
+    blocked_rx: CrossbeamReceiver<ConnectionBlockedNotification>,
+}
+
+impl Deref for IoLoopHandle0 {
+    type Target = IoLoopHandle;
+
+    fn deref(&self) -> &IoLoopHandle {
+        &self.common
+    }
+}
+
+impl DerefMut for IoLoopHandle0 {
+    fn deref_mut(&mut self) -> &mut IoLoopHandle {
+        &mut self.common
+    }
+}
+
 pub(crate) struct IoLoop {
     stream: TcpStream,
     poll: Poll,
@@ -241,7 +290,7 @@ impl IoLoop {
     ) -> Result<(JoinHandle<Result<()>>, Channel0Handle)> {
         let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
 
-        let (ch0_slot, ch0_handle) = ChannelSlot::new(self.inner.mio_channel_bound, 0);
+        let (ch0_slot, ch0_handle) = Channel0Slot::new(self.inner.mio_channel_bound);
 
         let join_handle = Builder::new()
             .name("amiquip-io".to_string())
@@ -267,10 +316,15 @@ impl IoLoop {
         mut self,
         options: ConnectionOptions<Auth>,
         handshake_done_tx: crossbeam_channel::Sender<usize>,
-        ch0_slot: ChannelSlot,
+        ch0_slot: Channel0Slot,
     ) -> Result<()> {
         self.poll
-            .register(&ch0_slot.rx, Token(0), Ready::readable(), PollOpt::edge())
+            .register(
+                &ch0_slot.common.rx,
+                Token(0),
+                Ready::readable(),
+                PollOpt::edge(),
+            )
             .context(ErrorKind::Io)?;
         let tune_ok = self.run_handshake(options)?;
         let channel_max = tune_ok.channel_max;
@@ -279,10 +333,7 @@ impl IoLoop {
             Err(_) => return Ok(()),
         }
         self.inner.chan_slots.set_channel_max(channel_max);
-        self.inner
-            .chan_slots
-            .insert(Some(0), |_| Ok((ch0_slot, ())))?;
-        self.run_connection()
+        self.run_connection(ch0_slot)
     }
 
     fn run_handshake<Auth: Sasl>(&mut self, options: ConnectionOptions<Auth>) -> Result<TuneOk> {
@@ -347,15 +398,15 @@ impl IoLoop {
         }
     }
 
-    fn run_connection(&mut self) -> Result<()> {
-        let mut state = ConnectionState::Steady;
+    fn run_connection(&mut self, ch0_slot: Channel0Slot) -> Result<()> {
+        let mut state = ConnectionState::Steady(ch0_slot);
         self.run_io_loop(
             &mut state,
             Self::handle_steady_event,
             Self::is_connection_done,
         )?;
         match state {
-            ConnectionState::Steady => unreachable!(),
+            ConnectionState::Steady(_) => unreachable!(),
             ConnectionState::ServerClosing(close) => Err(ErrorKind::ServerClosedConnection(
                 close.reply_code,
                 close.reply_text,
@@ -380,8 +431,18 @@ impl IoLoop {
                 }
             }
             HEARTBEAT => self.inner.process_heartbeat_timers()?,
+            Token(0) => match &state {
+                ConnectionState::Steady(ch0_slot) => {
+                    self.inner.handle_channel0_readable(ch0_slot, &self.poll)?
+                }
+                ConnectionState::ServerClosing(_)
+                | ConnectionState::ClientException
+                | ConnectionState::ClientClosed => {
+                    unreachable!("ch0 slot cannot be readable after it is dropped")
+                }
+            },
             Token(n) if n <= u16::max_value() as usize => {
-                self.inner.process_channel_request(n as u16, &self.poll)?
+                self.inner.handle_channel_readable(n as u16, &self.poll)?
             }
             _ => unreachable!(),
         })
@@ -389,7 +450,7 @@ impl IoLoop {
 
     fn is_connection_done(&self, state: &ConnectionState) -> bool {
         match state {
-            ConnectionState::Steady => false,
+            ConnectionState::Steady(_) => false,
             ConnectionState::ClientClosed => true,
             ConnectionState::ServerClosing(_) | ConnectionState::ClientException => {
                 // we're mid-close, but not actually done until all our writes have gone out
@@ -553,7 +614,15 @@ impl Inner {
         Ok(())
     }
 
-    fn process_channel_request(&mut self, channel_id: u16, poll: &Poll) -> Result<()> {
+    fn handle_channel0_readable(&mut self, ch0_slot: &Channel0Slot, poll: &Poll) -> Result<()> {
+        match ch0_slot.common.rx.try_recv() {
+            Ok(message) => self.process_channel_message(message, poll),
+            Err(TryRecvError::Empty) => Ok(()),
+            Err(TryRecvError::Disconnected) => Err(ErrorKind::EventLoopClientDropped)?,
+        }
+    }
+
+    fn handle_channel_readable(&mut self, channel_id: u16, poll: &Poll) -> Result<()> {
         loop {
             let slot = match self.chan_slots.get(channel_id) {
                 Some(slot) => slot,
@@ -568,46 +637,49 @@ impl Inner {
                     return Ok(());
                 }
             };
-            let message = match slot.rx.try_recv() {
-                Ok(message) => message,
+            match slot.rx.try_recv() {
+                Ok(message) => self.process_channel_message(message, poll)?,
                 Err(TryRecvError::Empty) => return Ok(()),
                 Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
-            };
+            }
+        }
+    }
 
-            match message {
-                IoLoopMessage::Rpc(IoLoopRpc::ConnectionClose(buf)) => {
-                    self.outbuf.append(buf);
-                    self.seal_writes();
-                }
-                IoLoopMessage::Rpc(IoLoopRpc::Send(buf)) => {
-                    self.outbuf.append(buf);
-                }
-                IoLoopMessage::Command(IoLoopCommand::AllocateChannel(channel_id, tx)) => {
-                    let mio_channel_bound = self.mio_channel_bound;
-                    let result = self.chan_slots.insert(channel_id, |channel_id| {
-                        let (slot, handle) = ChannelSlot::new(mio_channel_bound, channel_id);
-                        poll.register(
-                            &slot.rx,
-                            Token(channel_id as usize),
-                            Ready::readable(),
-                            PollOpt::edge(),
-                        )
-                        .context(ErrorKind::Io)?;
-                        Ok((slot, handle))
-                    });
-                    match tx.send(result) {
-                        Ok(()) => (),
-                        Err(SendError(Ok(handle))) => {
-                            // send failed - clear the allocated channel
-                            self.chan_slots.remove(handle.channel_id);
-                        }
-                        Err(SendError(Err(_))) => {
-                            // send failed, but so did channel creation. do nothing
-                        }
+    fn process_channel_message(&mut self, message: IoLoopMessage, poll: &Poll) -> Result<()> {
+        match message {
+            IoLoopMessage::Rpc(IoLoopRpc::ConnectionClose(buf)) => {
+                self.outbuf.append(buf);
+                self.seal_writes();
+            }
+            IoLoopMessage::Rpc(IoLoopRpc::Send(buf)) => {
+                self.outbuf.append(buf);
+            }
+            IoLoopMessage::Command(IoLoopCommand::AllocateChannel(channel_id, tx)) => {
+                let mio_channel_bound = self.mio_channel_bound;
+                let result = self.chan_slots.insert(channel_id, |channel_id| {
+                    let (slot, handle) = ChannelSlot::new(mio_channel_bound, channel_id);
+                    poll.register(
+                        &slot.rx,
+                        Token(channel_id as usize),
+                        Ready::readable(),
+                        PollOpt::edge(),
+                    )
+                    .context(ErrorKind::Io)?;
+                    Ok((slot, handle))
+                });
+                match tx.send(result) {
+                    Ok(()) => (),
+                    Err(SendError(Ok(handle))) => {
+                        // send failed - clear the allocated channel
+                        self.chan_slots.remove(handle.channel_id);
+                    }
+                    Err(SendError(Err(_))) => {
+                        // send failed, but so did channel creation. do nothing
                     }
                 }
             }
         }
+        Ok(())
     }
 
     fn read_from_stream<S, F>(

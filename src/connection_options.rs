@@ -116,10 +116,11 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
             )),
         );
         let mut capabilities = FieldTable::new();
-        capabilities.insert(
-            "consumer_cancel_notify".to_string(),
-            AMQPValue::Boolean(true),
-        );
+        let mut set_cap = |k: &str| {
+            capabilities.insert(k.to_string(), AMQPValue::Boolean(true));
+        };
+        set_cap("consumer_cancel_notify");
+        set_cap("connection.blocked");
         client_properties.insert(
             "capabilities".to_string(),
             AMQPValue::FieldTable(capabilities),

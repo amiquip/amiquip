@@ -20,6 +20,7 @@ pub use consumer::{Consumer, ConsumerMessage};
 pub use delivery::Delivery;
 pub use errors::ArcError as Error;
 pub use errors::{ErrorKind, Result};
+pub use io_loop::ConnectionBlockedNotification;
 
 pub use amq_protocol::protocol::basic::AMQPProperties as AmqpProperties;
 

@@ -1,7 +1,8 @@
 use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::io_loop::{Channel0Handle, IoLoop};
-use crate::{Channel, ErrorKind, Result};
+use crate::{Channel, ConnectionBlockedNotification, ErrorKind, Result};
+use crossbeam_channel::Receiver;
 use log::debug;
 use mio::net::TcpStream;
 use std::thread::JoinHandle;
@@ -35,6 +36,10 @@ impl Connection {
 
     pub fn close(mut self) -> Result<()> {
         self.close_impl()
+    }
+
+    pub fn blocked_notifications(&self) -> &Receiver<ConnectionBlockedNotification> {
+        self.channel0.blocked_notifications()
     }
 
     fn close_impl(&mut self) -> Result<()> {

@@ -13,11 +13,13 @@ use failure::ResultExt;
 use log::{debug, error, trace, warn};
 use std::collections::hash_map::Entry;
 
-use super::{ChannelMessage, ChannelSlot, ConsumerMessage, Inner};
+use super::{
+    Channel0Slot, ChannelMessage, ChannelSlot, ConnectionBlockedNotification, ConsumerMessage,
+    Inner,
+};
 
-#[derive(Debug)]
 pub(super) enum ConnectionState {
-    Steady,
+    Steady(Channel0Slot),
     ServerClosing(ConnectionClose),
     ClientException,
     ClientClosed,
@@ -54,12 +56,12 @@ fn send<T: Send + Sync + 'static>(tx: &Sender<T>, item: T) -> Result<()> {
 impl ConnectionState {
     pub(super) fn process(&mut self, inner: &mut Inner, frame: AMQPFrame) -> Result<()> {
         // bail out if we shouldn't be getting frames
-        match self {
-            ConnectionState::Steady => (),
+        let ch0_slot = match self {
+            ConnectionState::Steady(ch0_slot) => ch0_slot,
             ConnectionState::ServerClosing(_)
             | ConnectionState::ClientClosed
             | ConnectionState::ClientException => Err(ErrorKind::FrameUnexpected)?,
-        }
+        };
 
         Ok(match frame {
             // Server-sent heartbeat
@@ -88,11 +90,7 @@ impl ConnectionState {
             }
             // Server ack for client-initiated connection close.
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::CloseOk(close_ok))) => {
-                inner
-                    .chan_slots
-                    .get(0)
-                    .unwrap() // channel 0 slot always exist if we got to Steady state
-                    .tx
+                ch0_slot.common.tx
                     .send(Ok(ChannelMessage::Method(AMQPClass::Connection(
                         AmqpConnection::CloseOk(close_ok),
                     ))))
@@ -105,6 +103,16 @@ impl ConnectionState {
                         send(&tx, ConsumerMessage::ClientClosedConnection)?;
                     }
                 }
+            }
+            // Server is blocking publishes due to an alarm on its side (e.g., low mem)
+            AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Blocked(blocked))) => {
+                warn!("server has blocked connection; reason = {}", blocked.reason);
+                send(&ch0_slot.blocked_tx, ConnectionBlockedNotification::Blocked(blocked.reason))?;
+            }
+            // Server has unblocked publishes
+            AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Unblocked(_))) => {
+                warn!("server has unblocked connection");
+                send(&ch0_slot.blocked_tx, ConnectionBlockedNotification::Unblocked)?;
             }
             // TODO handle other expected channel 0 methods
             AMQPFrame::Method(0, other) => {
