@@ -20,6 +20,12 @@ pub(super) enum HandshakeState<Auth: Sasl> {
 
 impl<Auth: Sasl> HandshakeState<Auth> {
     pub(super) fn process(&mut self, inner: &mut Inner, frame: AMQPFrame) -> Result<()> {
+        // unlikely but not impossible to receive a heartbeat during handshake
+        if let AMQPFrame::Heartbeat(0) = frame {
+            debug!("received heartbeat");
+            return Ok(());
+        }
+
         Ok(match self {
             HandshakeState::Start(options) => {
                 let start = Start::try_from(0, frame)?;

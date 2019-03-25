@@ -84,8 +84,8 @@ pub enum ErrorKind {
     #[fail(display = "server closed connection (code={} message={})", _0, _1)]
     ServerClosedConnection(u16, String),
 
-    #[fail(display = "client closed connection (code={} message={})", _0, _1)]
-    ClientClosedConnection(u16, String),
+    #[fail(display = "client closed connection")]
+    ClientClosedConnection,
 
     #[fail(display = "server closed channel {} (code={}, message={})", _0, _1, _2)]
     ServerClosedChannel(u16, u16, String),

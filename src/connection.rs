@@ -8,7 +8,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub struct Connection {
-    join_handle: Option<JoinHandle<()>>,
+    join_handle: Option<JoinHandle<Result<()>>>,
     channel0: Channel0Handle,
 }
 
@@ -43,11 +43,7 @@ impl Connection {
             self.channel0.close_connection()?;
             join_handle
                 .join()
-                .map_err(|err| ErrorKind::IoThreadPanic(format!("{:?}", err)))?;
-
-            // if join_handle joined successfully, it's safe to unwrap the io_loop_result
-            // because it filled it in before exiting.
-            self.channel0.io_loop_result().unwrap()
+                .map_err(|err| ErrorKind::IoThreadPanic(format!("{:?}", err)))?
         } else {
             // no join handle left - someone already took it, which is only possible
             // if we're being called from Drop after someone called close(), and drop

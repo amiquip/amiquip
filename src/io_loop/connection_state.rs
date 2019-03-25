@@ -10,7 +10,7 @@ use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
 use amq_protocol::protocol::{AMQPClass, AMQPHardError};
 use crossbeam_channel::Sender;
 use failure::ResultExt;
-use log::{error, trace, warn};
+use log::{debug, error, trace, warn};
 use std::collections::hash_map::Entry;
 
 use super::{ChannelMessage, ChannelSlot, ConsumerMessage, Inner};
@@ -62,6 +62,16 @@ impl ConnectionState {
         }
 
         Ok(match frame {
+            // Server-sent heartbeat
+            AMQPFrame::Heartbeat(0) => {
+                // nothing to do here; IoLoop already updated heartbeat timer when it
+                // received data on the socket
+                debug!("received heartbeat");
+            }
+            // We never expect to see a protocl header (we send it to begin the connection)
+            // or a heartbeat on a non-0 channel.
+            AMQPFrame::ProtocolHeader | AMQPFrame::Heartbeat(_) => Err(ErrorKind::FrameUnexpected)?,
+            // Server-initiated connection close.
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
                 inner.push_method(0, AmqpConnection::CloseOk(ConnectionCloseOk {}))?;
                 inner.seal_writes();
@@ -70,24 +80,27 @@ impl ConnectionState {
                 *self = ConnectionState::ServerClosing(close);
 
                 for (_, mut slot) in inner.chan_slots.drain() {
+                    send(&slot.tx, Err(err.clone().into()))?;
                     for (_, tx) in slot.consumers.drain() {
                         send(&tx, ConsumerMessage::ServerClosedConnection(err.clone()))?;
                     }
                 }
             }
+            // Server ack for client-initiated connection close.
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::CloseOk(close_ok))) => {
                 inner
                     .chan_slots
                     .get(0)
                     .unwrap() // channel 0 slot always exist if we got to Steady state
                     .tx
-                    .send(ChannelMessage::Method(AMQPClass::Connection(
+                    .send(Ok(ChannelMessage::Method(AMQPClass::Connection(
                         AmqpConnection::CloseOk(close_ok),
-                    )))
+                    ))))
                     .context(ErrorKind::EventLoopClientDropped)?;
                 *self = ConnectionState::ClientClosed;
 
                 for (_, mut slot) in inner.chan_slots.drain() {
+                    send(&slot.tx, Err(ErrorKind::ClientClosedConnection.into()))?;
                     for (_, tx) in slot.consumers.drain() {
                         send(&tx, ConsumerMessage::ClientClosedConnection)?;
                     }
@@ -107,6 +120,7 @@ impl ConnectionState {
                 inner.seal_writes();
                 *self = ConnectionState::ClientException;
             }
+            // Reject content frames on channel 0.
             AMQPFrame::Header(0, _, _) | AMQPFrame::Body(0, _) => {
                 let text = format!("received illegal channel 0 frame {:?}", frame);
                 error!("{} - closing connection", text);
@@ -120,26 +134,31 @@ impl ConnectionState {
                 inner.seal_writes();
                 *self = ConnectionState::ClientException;
             }
+            // Server-initiated channel close.
             AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::Close(close))) => {
                 warn!("server closing channel {}: {:?}", n, close);
                 let mut slot = slot_remove(inner, n)?;
                 let err = ErrorKind::ServerClosedChannel(n, close.reply_code, close.reply_text);
-                send(&slot.tx, ChannelMessage::ServerClosing(err.clone()))?;
+                send(&slot.tx, Err(err.clone().into()))?;
                 for (_, tx) in slot.consumers.drain() {
                     send(&tx, ConsumerMessage::ServerClosedChannel(err.clone()))?;
                 }
                 inner.push_method(n, AmqpChannel::CloseOk(ChannelCloseOk {}))?;
             }
+            // Server ack for client-initiated channel close.
             AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))) => {
                 let mut slot = slot_remove(inner, n)?;
                 send(
                     &slot.tx,
-                    ChannelMessage::Method(AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))),
+                    Ok(ChannelMessage::Method(AMQPClass::Channel(
+                        AmqpChannel::CloseOk(close_ok),
+                    ))),
                 )?;
                 for (_, tx) in slot.consumers.drain() {
                     send(&tx, ConsumerMessage::ClientClosedChannel)?;
                 }
             }
+            // Server ack for consume request.
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::ConsumeOk(consume_ok))) => {
                 let consumer_tag = consume_ok.consumer_tag;
                 let slot = slot_get_mut(inner, n)?;
@@ -148,10 +167,11 @@ impl ConnectionState {
                     Entry::Vacant(entry) => {
                         let (tx, rx) = crossbeam_channel::unbounded();
                         entry.insert(tx);
-                        send(&slot.tx, ChannelMessage::ConsumeOk(consumer_tag, rx))?;
+                        send(&slot.tx, Ok(ChannelMessage::ConsumeOk(consumer_tag, rx)))?;
                     }
                 }
             }
+            // Server-initiated consumer cancel.
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::Cancel(cancel))) => {
                 let consumer_tag = cancel.consumer_tag;
                 let slot = slot_get_mut(inner, n)?;
@@ -167,21 +187,26 @@ impl ConnectionState {
                     )?;
                 }
             }
+            // Server ack for client-initiated consumer cancel.
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::CancelOk(cancel_ok))) => {
                 let slot = slot_get_mut(inner, n)?;
                 let consumer = slot.consumers.remove(&cancel_ok.consumer_tag);
                 send(
                     &slot.tx,
-                    ChannelMessage::Method(AMQPClass::Basic(AmqpBasic::CancelOk(cancel_ok))),
+                    Ok(ChannelMessage::Method(AMQPClass::Basic(
+                        AmqpBasic::CancelOk(cancel_ok),
+                    ))),
                 )?;
                 if let Some(tx) = consumer {
                     send(&tx, ConsumerMessage::Cancelled)?;
                 }
             }
+            // Server beginning delivery of content to a consumer.
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::Deliver(deliver))) => {
                 let slot = slot_get_mut(inner, n)?;
                 slot.collector.collect_deliver(deliver)?;
             }
+            // TODO break this out into other methods so we know which ones we expect
             AMQPFrame::Method(n, method) => {
                 let slot = slot_get(inner, n)?;
                 trace!(
@@ -189,12 +214,14 @@ impl ConnectionState {
                     n,
                     method
                 );
-                send(&slot.tx, ChannelMessage::Method(method))?;
+                send(&slot.tx, Ok(ChannelMessage::Method(method)))?;
             }
+            // Server sending content header as part of a deliver.
             AMQPFrame::Header(n, _, header) => {
                 let slot = slot_get_mut(inner, n)?;
                 slot.collector.collect_header(*header)?;
             }
+            // Server sending content body as part of a deliver.
             AMQPFrame::Body(n, body) => {
                 let slot = slot_get_mut(inner, n)?;
                 if let Some((consumer_tag, delivery)) = slot.collector.collect_body(body)? {
@@ -205,7 +232,7 @@ impl ConnectionState {
                     send(tx, ConsumerMessage::Delivery(delivery))?;
                 }
             }
-            _ => panic!("TODO"),
+            //_ => panic!("TODO"),
         })
     }
 }

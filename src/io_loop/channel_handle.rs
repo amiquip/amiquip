@@ -1,6 +1,6 @@
 use super::{ConsumerMessage, CrossbeamReceiver, IoLoopCommand, IoLoopHandle, IoLoopRpc};
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
-use crate::{ErrorKind, Result};
+use crate::{Error, ErrorKind, Result};
 use amq_protocol::protocol::basic::{AMQPProperties, Consume};
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::channel::Close as ChannelClose;
@@ -37,11 +37,6 @@ impl Channel0Handle {
         Channel0Handle { handle, frame_max }
     }
 
-    #[inline]
-    pub(crate) fn io_loop_result(&self) -> Option<Result<()>> {
-        self.handle.io_loop_result()
-    }
-
     pub(crate) fn close_connection(&mut self) -> Result<()> {
         debug_assert!(self.handle.buf.is_empty());
         let close = AmqpConnection::Close(ConnectionClose {
@@ -63,10 +58,9 @@ impl Channel0Handle {
             .send_command(IoLoopCommand::AllocateChannel(channel_id, tx))?;
 
         // double ?? - peel off recv error then channel allocation error
-        let mut handle = rx.recv().map_err(|_| match self.handle.io_loop_result() {
-            Some(Ok(())) | None => ErrorKind::EventLoopDropped.into(),
-            Some(Err(err)) => err,
-        })??;
+        let mut handle = rx
+            .recv()
+            .map_err(|_| Error::from(ErrorKind::EventLoopDropped))??;
 
         debug!("opening channel {}", handle.channel_id);
         let out_of_band = String::new();

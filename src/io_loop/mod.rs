@@ -2,7 +2,7 @@ use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer, TryFromAmqpClass};
-use crate::{ConsumerMessage, ErrorKind, Result};
+use crate::{ConsumerMessage, Error, ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::{AMQPProperties, Consume};
@@ -21,7 +21,6 @@ use mio_extras::channel::SyncSender as MioSyncSender;
 use std::collections::hash_map::HashMap;
 use std::io;
 use std::sync::mpsc::TryRecvError;
-use std::sync::{Arc, Mutex};
 use std::thread::{Builder, JoinHandle};
 use std::time::Duration;
 
@@ -61,24 +60,19 @@ enum IoLoopMessage {
 
 #[derive(Debug)]
 enum ChannelMessage {
-    ServerClosing(ErrorKind),
     ConsumeOk(String, CrossbeamReceiver<ConsumerMessage>),
     Method(AMQPClass),
 }
 
 struct ChannelSlot {
     rx: MioReceiver<IoLoopMessage>,
-    tx: CrossbeamSender<ChannelMessage>,
+    tx: CrossbeamSender<Result<ChannelMessage>>,
     collector: DeliveryCollector,
     consumers: HashMap<String, CrossbeamSender<ConsumerMessage>>,
 }
 
 impl ChannelSlot {
-    fn new(
-        mio_channel_bound: usize,
-        channel_id: u16,
-        io_loop_result: Arc<Mutex<Option<Result<()>>>>,
-    ) -> (ChannelSlot, IoLoopHandle) {
+    fn new(mio_channel_bound: usize, channel_id: u16) -> (ChannelSlot, IoLoopHandle) {
         let (mio_tx, mio_rx) = mio_sync_channel(mio_channel_bound);
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -94,7 +88,6 @@ impl ChannelSlot {
             buf: OutputBuffer::empty(),
             tx: mio_tx,
             rx,
-            io_loop_result,
         };
 
         (channel_slot, loop_handle)
@@ -105,8 +98,7 @@ struct IoLoopHandle {
     channel_id: u16,
     buf: OutputBuffer,
     tx: MioSyncSender<IoLoopMessage>,
-    rx: CrossbeamReceiver<ChannelMessage>,
-    io_loop_result: Arc<Mutex<Option<Result<()>>>>,
+    rx: CrossbeamReceiver<Result<ChannelMessage>>,
 }
 
 impl IoLoopHandle {
@@ -129,7 +121,6 @@ impl IoLoopHandle {
         match self.recv()? {
             ChannelMessage::ConsumeOk(tag, rx) => Ok((tag, rx)),
             ChannelMessage::Method(_) => Err(ErrorKind::FrameUnexpected)?,
-            ChannelMessage::ServerClosing(err) => Err(err)?,
         }
     }
 
@@ -142,7 +133,6 @@ impl IoLoopHandle {
         self.send(IoLoopMessage::Rpc(rpc))?;
         match self.recv()? {
             ChannelMessage::Method(method) => T::try_from(method),
-            ChannelMessage::ServerClosing(err) => Err(err)?,
             ChannelMessage::ConsumeOk(_, _) => Err(ErrorKind::FrameUnexpected)?,
         }
     }
@@ -181,10 +171,15 @@ impl IoLoopHandle {
             // failed to send to the I/O thread; possible causes are:
             //   1. Server closed channel; we should see if there's a relevant message
             //      waiting for us on rx.
-            //   2. I/O loop is actually gone - try to get its final error.
+            //   2. I/O loop is actually gone.
+            // In either case, recv() will return Err. If it doesn't, we got somehow
+            // got a frame after a send failure - this should be impossible, but return
+            // FrameUnexpected just in case.
             match self.recv() {
-                Ok(ChannelMessage::ServerClosing(err)) => err.into(),
-                Ok(ChannelMessage::Method(_)) | Ok(ChannelMessage::ConsumeOk(_, _)) => {
+                Ok(_) => {
+                    error!(
+                        "internal error - received unexpected frame after I/O thread disappeared"
+                    );
                     ErrorKind::FrameUnexpected.into()
                 }
                 Err(err) => err,
@@ -193,18 +188,9 @@ impl IoLoopHandle {
     }
 
     fn recv(&mut self) -> Result<ChannelMessage> {
-        self.rx.recv().map_err(|_| {
-            // failed to recv from the I/O thread; this shouldn't happen unless
-            // it died for some reason, so try to get its final result.
-            match self.io_loop_result() {
-                Some(Ok(())) | None => ErrorKind::EventLoopDropped.into(),
-                Some(Err(err)) => err.clone(),
-            }
-        })
-    }
-
-    fn io_loop_result(&self) -> Option<Result<()>> {
-        self.io_loop_result.lock().unwrap().clone()
+        self.rx
+            .recv()
+            .map_err(|_| Error::from(ErrorKind::EventLoopDropped))?
     }
 }
 
@@ -252,35 +238,28 @@ impl IoLoop {
     pub(crate) fn start<Auth: Sasl>(
         self,
         options: ConnectionOptions<Auth>,
-    ) -> Result<(JoinHandle<()>, Channel0Handle)> {
+    ) -> Result<(JoinHandle<Result<()>>, Channel0Handle)> {
         let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
-        let io_loop_result = Arc::clone(&self.inner.io_loop_result);
 
-        let (ch0_slot, ch0_handle) =
-            ChannelSlot::new(self.inner.mio_channel_bound, 0, Arc::clone(&io_loop_result));
+        let (ch0_slot, ch0_handle) = ChannelSlot::new(self.inner.mio_channel_bound, 0);
 
         let join_handle = Builder::new()
             .name("amiquip-io".to_string())
-            .spawn(move || {
-                let result = self.thread_main(options, handshake_done_tx, ch0_slot);
-                let mut io_loop_result = io_loop_result.lock().unwrap();
-                *io_loop_result = Some(result);
-            })
+            .spawn(move || self.thread_main(options, handshake_done_tx, ch0_slot))
             .context(ErrorKind::ForkFailed)?;
 
         match handshake_done_rx.recv() {
             Ok(frame_max) => Ok((join_handle, Channel0Handle::new(ch0_handle, frame_max))),
-            Err(_) => {
-                let result = match join_handle.join() {
-                    Ok(()) => ch0_handle.io_loop_result().unwrap(),
-                    Err(err) => Err(ErrorKind::IoThreadPanic(format!("{:?}", err)).into()),
-                };
-                assert!(
-                    result.is_err(),
-                    "i/o thread died without sending us tune-ok"
-                );
-                Err(result.unwrap_err())
-            }
+
+            // If sender was dropped without sending, the I/O thread has failed; peel out
+            // its final error.
+            Err(_) => match join_handle.join() {
+                Ok(Ok(())) => {
+                    unreachable!("I/O thread ended successfully without completing handshake")
+                }
+                Ok(Err(err)) => Err(err),
+                Err(err) => Err(ErrorKind::IoThreadPanic(format!("{:?}", err)).into()),
+            },
         }
     }
 
@@ -501,9 +480,6 @@ struct Inner {
     // Bound for in-memory channels that send to our I/O thread. (Channels going _from_
     // the I/O thread are unbounded to prevent blocking the I/O thread on slow receviers.)
     mio_channel_bound: usize,
-
-    // Slot to store the final result of our I/O thread.
-    io_loop_result: Arc<Mutex<Option<Result<()>>>>,
 }
 
 impl Inner {
@@ -513,7 +489,6 @@ impl Inner {
             heartbeats,
             chan_slots: ChannelSlots::new(),
             mio_channel_bound,
-            io_loop_result: Arc::default(),
         }
     }
 
@@ -608,11 +583,9 @@ impl Inner {
                     self.outbuf.append(buf);
                 }
                 IoLoopMessage::Command(IoLoopCommand::AllocateChannel(channel_id, tx)) => {
-                    let io_loop_result = Arc::clone(&self.io_loop_result);
                     let mio_channel_bound = self.mio_channel_bound;
                     let result = self.chan_slots.insert(channel_id, |channel_id| {
-                        let (slot, handle) =
-                            ChannelSlot::new(mio_channel_bound, channel_id, io_loop_result);
+                        let (slot, handle) = ChannelSlot::new(mio_channel_bound, channel_id);
                         poll.register(
                             &slot.rx,
                             Token(channel_id as usize),
@@ -649,12 +622,7 @@ impl Inner {
     {
         let n = frame_buffer.read_from(stream, |frame| {
             trace!("read frame {:?}", frame);
-            Ok(match frame {
-                // Heartbeats can come at any time, so filter them out here.
-                // Let ConnectionState handle all other frames.
-                AMQPFrame::Heartbeat(0) => debug!("received heartbeat"),
-                frame => handler(self, frame)?,
-            })
+            handler(self, frame)
         })?;
         if n > 0 {
             self.heartbeats.record_rx_activity();
