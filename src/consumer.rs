@@ -1,9 +1,17 @@
-use crate::{Delivery, ErrorKind};
+use crate::{Channel, Delivery, ErrorKind, Result};
 use crossbeam_channel::Receiver;
 
 pub struct Consumer {
+    channel: Channel,
     consumer_tag: String,
     rx: Receiver<ConsumerMessage>,
+    cancelled: bool,
+}
+
+impl Drop for Consumer {
+    fn drop(&mut self) {
+        let _ = self.cancel();
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -17,15 +25,39 @@ pub enum ConsumerMessage {
 }
 
 impl Consumer {
-    pub(crate) fn new(consumer_tag: String, rx: Receiver<ConsumerMessage>) -> Consumer {
-        Consumer { consumer_tag, rx }
+    pub(crate) fn new(
+        channel: Channel,
+        consumer_tag: String,
+        rx: Receiver<ConsumerMessage>,
+    ) -> Consumer {
+        Consumer {
+            channel,
+            consumer_tag,
+            rx,
+            cancelled: false,
+        }
     }
 
+    #[inline]
     pub fn consumer_tag(&self) -> &str {
         &self.consumer_tag
     }
 
+    #[inline]
     pub fn receiver(&self) -> &Receiver<ConsumerMessage> {
         &self.rx
+    }
+
+    pub fn cancel(&mut self) -> Result<()> {
+        if self.cancelled {
+            return Ok(());
+        }
+        self.cancelled = true;
+        self.channel.basic_cancel(&self)
+    }
+
+    #[inline]
+    pub fn ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
+        self.channel.basic_ack(delivery, multiple)
     }
 }

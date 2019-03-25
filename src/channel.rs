@@ -64,7 +64,7 @@ impl Channel {
             nowait: false,                // TODO should we support this?
             arguments: FieldTable::new(), // TODO anything to put here?
         })?;
-        Ok(Consumer::new(tag, rx))
+        Ok(Consumer::new(self.clone(), tag, rx))
     }
 
     pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
