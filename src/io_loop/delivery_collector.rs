@@ -39,7 +39,7 @@ impl DeliveryCollector {
                 buf.append(&mut body);
                 if buf.len() == body_size {
                     self.state = None;
-                    Ok(Some(Delivery::new(deliver, buf)))
+                    Ok(Some(Delivery::new(deliver, buf, header.properties)))
                 } else if buf.len() < body_size {
                     self.state = Some(State::Body(deliver, header, buf));
                     Ok(None)
