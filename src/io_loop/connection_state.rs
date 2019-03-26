@@ -58,9 +58,10 @@ impl ConnectionState {
         // bail out if we shouldn't be getting frames
         let ch0_slot = match self {
             ConnectionState::Steady(ch0_slot) => ch0_slot,
-            ConnectionState::ServerClosing(_)
-            | ConnectionState::ClientClosed
-            | ConnectionState::ClientException => Err(ErrorKind::FrameUnexpected)?,
+            ConnectionState::ClientException => return Ok(()),
+            ConnectionState::ServerClosing(_) | ConnectionState::ClientClosed => {
+                Err(ErrorKind::FrameUnexpected)?
+            }
         };
 
         Ok(match frame {
