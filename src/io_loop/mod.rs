@@ -116,7 +116,6 @@ impl Channel0Slot {
 }
 
 pub(crate) struct IoLoop {
-    stream: TcpStream,
     poll: Poll,
     poll_timeout: Option<Duration>,
     frame_buffer: FrameBuffer,
@@ -129,17 +128,10 @@ pub(crate) struct IoLoop {
 }
 
 impl IoLoop {
-    pub(crate) fn new(stream: TcpStream, tuning: ConnectionTuning) -> Result<Self> {
+    pub(crate) fn new(tuning: ConnectionTuning) -> Result<Self> {
         let heartbeats = HeartbeatTimers::default();
 
         let poll = Poll::new().context(ErrorKind::Io)?;
-        poll.register(
-            &stream,
-            STREAM,
-            Ready::readable() | Ready::writable(),
-            PollOpt::edge(),
-        )
-        .context(ErrorKind::Io)?;
         poll.register(
             &heartbeats.timer,
             HEARTBEAT,
@@ -149,7 +141,6 @@ impl IoLoop {
         .context(ErrorKind::Io)?;
 
         Ok(IoLoop {
-            stream,
             poll,
             frame_buffer: FrameBuffer::new(),
             inner: Inner::new(heartbeats, tuning.mem_channel_bound),
@@ -161,15 +152,24 @@ impl IoLoop {
 
     pub(crate) fn start<Auth: Sasl>(
         self,
+        stream: TcpStream,
         options: ConnectionOptions<Auth>,
     ) -> Result<(JoinHandle<Result<()>>, Channel0Handle)> {
-        let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
+        self.poll
+            .register(
+                &stream,
+                STREAM,
+                Ready::readable() | Ready::writable(),
+                PollOpt::edge(),
+            )
+            .context(ErrorKind::Io)?;
 
+        let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
         let (ch0_slot, ch0_handle) = Channel0Slot::new(self.inner.mio_channel_bound);
 
         let join_handle = Builder::new()
             .name("amiquip-io".to_string())
-            .spawn(move || self.thread_main(options, handshake_done_tx, ch0_slot))
+            .spawn(move || self.thread_main(stream, options, handshake_done_tx, ch0_slot))
             .context(ErrorKind::ForkFailed)?;
 
         match handshake_done_rx.recv() {
@@ -189,6 +189,7 @@ impl IoLoop {
 
     fn thread_main<Auth: Sasl>(
         mut self,
+        mut stream: TcpStream,
         options: ConnectionOptions<Auth>,
         handshake_done_tx: crossbeam_channel::Sender<usize>,
         ch0_slot: Channel0Slot,
@@ -209,19 +210,24 @@ impl IoLoop {
                 PollOpt::edge(),
             )
             .context(ErrorKind::Io)?;
-        let tune_ok = self.run_handshake(options)?;
+        let tune_ok = self.run_handshake(&mut stream, options)?;
         let channel_max = tune_ok.channel_max;
         match handshake_done_tx.send(tune_ok.frame_max as usize) {
             Ok(_) => (),
             Err(_) => return Ok(()),
         }
         self.inner.chan_slots.set_channel_max(channel_max);
-        self.run_connection(ch0_slot)
+        self.run_connection(&mut stream, ch0_slot)
     }
 
-    fn run_handshake<Auth: Sasl>(&mut self, options: ConnectionOptions<Auth>) -> Result<TuneOk> {
+    fn run_handshake<Auth: Sasl>(
+        &mut self,
+        stream: &mut TcpStream,
+        options: ConnectionOptions<Auth>,
+    ) -> Result<TuneOk> {
         let mut state = HandshakeState::Start(options);
         self.run_io_loop(
+            stream,
             &mut state,
             Self::handle_handshake_event,
             Self::is_handshake_done,
@@ -241,17 +247,18 @@ impl IoLoop {
 
     fn handle_handshake_event<Auth: Sasl>(
         &mut self,
+        stream: &mut TcpStream,
         state: &mut HandshakeState<Auth>,
         event: Event,
     ) -> Result<()> {
         Ok(match event.token() {
             STREAM => {
                 if event.readiness().is_writable() {
-                    self.inner.write_to_stream(&mut self.stream)?;
+                    self.inner.write_to_stream(stream)?;
                 }
                 if event.readiness().is_readable() {
                     self.inner.read_from_stream(
-                        &mut self.stream,
+                        stream,
                         &mut self.frame_buffer,
                         |inner, frame| state.process(inner, frame),
                     )?;
@@ -281,9 +288,10 @@ impl IoLoop {
         }
     }
 
-    fn run_connection(&mut self, ch0_slot: Channel0Slot) -> Result<()> {
+    fn run_connection(&mut self, stream: &mut TcpStream, ch0_slot: Channel0Slot) -> Result<()> {
         let mut state = ConnectionState::Steady(ch0_slot);
         self.run_io_loop(
+            stream,
             &mut state,
             Self::handle_steady_event,
             Self::is_connection_done,
@@ -299,15 +307,20 @@ impl IoLoop {
         }
     }
 
-    fn handle_steady_event(&mut self, state: &mut ConnectionState, event: Event) -> Result<()> {
+    fn handle_steady_event(
+        &mut self,
+        stream: &mut TcpStream,
+        state: &mut ConnectionState,
+        event: Event,
+    ) -> Result<()> {
         Ok(match event.token() {
             STREAM => {
                 if event.readiness().is_writable() {
-                    self.inner.write_to_stream(&mut self.stream)?;
+                    self.inner.write_to_stream(stream)?;
                 }
                 if event.readiness().is_readable() {
                     self.inner.read_from_stream(
-                        &mut self.stream,
+                        stream,
                         &mut self.frame_buffer,
                         |inner, frame| state.process(inner, frame),
                     )?;
@@ -358,12 +371,13 @@ impl IoLoop {
 
     fn run_io_loop<State, F, G>(
         &mut self,
+        stream: &mut TcpStream,
         state: &mut State,
         mut handle_event: F,
         is_done: G,
     ) -> Result<()>
     where
-        F: FnMut(&mut Self, &mut State, Event) -> Result<()>,
+        F: FnMut(&mut Self, &mut TcpStream, &mut State, Event) -> Result<()>,
         G: Fn(&Self, &State) -> bool,
     {
         let mut events = Events::with_capacity(128);
@@ -384,7 +398,7 @@ impl IoLoop {
 
             trace!("-- processing poll events --");
             for event in events.iter() {
-                handle_event(self, state, event)?;
+                handle_event(self, stream, state, event)?;
             }
 
             if is_done(self, state) {
@@ -426,7 +440,7 @@ impl IoLoop {
                 trace!("ending poll loop with data still to write - reregistering for writable");
                 self.poll
                     .reregister(
-                        &self.stream,
+                        stream,
                         STREAM,
                         Ready::readable() | Ready::writable(),
                         PollOpt::edge(),
@@ -435,7 +449,7 @@ impl IoLoop {
             } else if had_data_to_write {
                 trace!("had queued data but now we don't - waiting for socket to be readable");
                 self.poll
-                    .reregister(&self.stream, STREAM, Ready::readable(), PollOpt::edge())
+                    .reregister(stream, STREAM, Ready::readable(), PollOpt::edge())
                     .context(ErrorKind::Io)?;
             }
         }

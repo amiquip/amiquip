@@ -72,8 +72,8 @@ impl Connection {
         options: ConnectionOptions<Auth>,
         tuning: ConnectionTuning,
     ) -> Result<Connection> {
-        let io_loop = IoLoop::new(stream, tuning)?;
-        let (join_handle, channel0) = io_loop.start(options)?;
+        let io_loop = IoLoop::new(tuning)?;
+        let (join_handle, channel0) = io_loop.start(stream, options)?;
         Ok(Connection {
             join_handle: Some(join_handle),
             channel0,
