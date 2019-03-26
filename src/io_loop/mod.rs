@@ -1,11 +1,9 @@
 use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
-use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer, TryFromAmqpClass};
-use crate::{ConsumerMessage, Error, ErrorKind, Result};
+use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
+use crate::{ConsumerMessage, ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
-use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
-use amq_protocol::protocol::basic::{AMQPProperties, Consume};
 use amq_protocol::protocol::connection::TuneOk;
 use amq_protocol::protocol::AMQPClass;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
@@ -17,10 +15,8 @@ use mio::net::TcpStream;
 use mio::{Event, Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::sync_channel as mio_sync_channel;
 use mio_extras::channel::Receiver as MioReceiver;
-use mio_extras::channel::SyncSender as MioSyncSender;
 use std::collections::hash_map::HashMap;
 use std::io;
-use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::TryRecvError;
 use std::thread::{Builder, JoinHandle};
 use std::time::Duration;
@@ -31,6 +27,7 @@ mod connection_state;
 mod delivery_collector;
 mod handshake_state;
 mod heartbeat_timers;
+mod io_loop_handle;
 
 pub(crate) use channel_handle::{Channel0Handle, ChannelHandle};
 use channel_slots::ChannelSlots;
@@ -38,6 +35,7 @@ use connection_state::ConnectionState;
 use delivery_collector::DeliveryCollector;
 use handshake_state::HandshakeState;
 use heartbeat_timers::{HeartbeatKind, HeartbeatState, HeartbeatTimers};
+use io_loop_handle::{IoLoopHandle, IoLoopHandle0};
 
 const STREAM: Token = Token(u16::max_value() as usize + 1);
 const HEARTBEAT: Token = Token(u16::max_value() as usize + 2);
@@ -84,12 +82,7 @@ impl ChannelSlot {
             consumers: HashMap::new(),
         };
 
-        let loop_handle = IoLoopHandle {
-            channel_id,
-            buf: OutputBuffer::empty(),
-            tx: mio_tx,
-            rx,
-        };
+        let loop_handle = IoLoopHandle::new(channel_id, mio_tx, rx);
 
         (channel_slot, loop_handle)
     }
@@ -115,131 +108,9 @@ impl Channel0Slot {
             common: common_slot,
             blocked_tx,
         };
-        let handle = IoLoopHandle0 {
-            common: common_handle,
-            blocked_rx,
-        };
+        let handle = IoLoopHandle0::new(common_handle, blocked_rx);
 
         (slot, handle)
-    }
-}
-
-struct IoLoopHandle {
-    channel_id: u16,
-    buf: OutputBuffer,
-    tx: MioSyncSender<IoLoopMessage>,
-    rx: CrossbeamReceiver<Result<ChannelMessage>>,
-}
-
-impl IoLoopHandle {
-    fn make_buf<M: IntoAmqpClass>(&mut self, method: M) -> Result<OutputBuffer> {
-        debug_assert!(self.buf.is_empty());
-        self.buf.push_method(self.channel_id, method)?;
-        Ok(self.buf.drain_into_new_buf())
-    }
-
-    fn send_command(&mut self, command: IoLoopCommand) -> Result<()> {
-        self.send(IoLoopMessage::Command(command))
-    }
-
-    fn consume(
-        &mut self,
-        consume: Consume,
-    ) -> Result<(String, CrossbeamReceiver<ConsumerMessage>)> {
-        let buf = self.make_buf(AmqpBasic::Consume(consume))?;
-        self.send(IoLoopMessage::Rpc(IoLoopRpc::Send(buf)))?;
-        match self.recv()? {
-            ChannelMessage::ConsumeOk(tag, rx) => Ok((tag, rx)),
-            ChannelMessage::Method(_) => Err(ErrorKind::FrameUnexpected)?,
-        }
-    }
-
-    fn call<M: IntoAmqpClass, T: TryFromAmqpClass>(&mut self, method: M) -> Result<T> {
-        let buf = self.make_buf(method)?;
-        self.call_rpc(IoLoopRpc::Send(buf))
-    }
-
-    fn call_rpc<T: TryFromAmqpClass>(&mut self, rpc: IoLoopRpc) -> Result<T> {
-        self.send(IoLoopMessage::Rpc(rpc))?;
-        match self.recv()? {
-            ChannelMessage::Method(method) => T::try_from(method),
-            ChannelMessage::ConsumeOk(_, _) => Err(ErrorKind::FrameUnexpected)?,
-        }
-    }
-
-    fn send_nowait<M: IntoAmqpClass>(&mut self, method: M) -> Result<()> {
-        let buf = self.make_buf(method)?;
-        self.send_rpc_nowait(IoLoopRpc::Send(buf))
-    }
-
-    fn send_rpc_nowait(&mut self, rpc: IoLoopRpc) -> Result<()> {
-        self.send(IoLoopMessage::Rpc(rpc))
-    }
-
-    fn send_content_header(
-        &mut self,
-        class_id: u16,
-        len: usize,
-        properties: &AMQPProperties,
-    ) -> Result<()> {
-        debug_assert!(self.buf.is_empty());
-        self.buf
-            .push_content_header(self.channel_id, class_id, len, properties)?;
-        let buf = self.buf.drain_into_new_buf();
-        self.send_rpc_nowait(IoLoopRpc::Send(buf))
-    }
-
-    fn send_content_body(&mut self, content: &[u8]) -> Result<()> {
-        debug_assert!(self.buf.is_empty());
-        self.buf.push_content_body(self.channel_id, content)?;
-        let buf = self.buf.drain_into_new_buf();
-        self.send_rpc_nowait(IoLoopRpc::Send(buf))
-    }
-
-    fn send(&mut self, message: IoLoopMessage) -> Result<()> {
-        self.tx.send(message).map_err(|_| {
-            // failed to send to the I/O thread; possible causes are:
-            //   1. Server closed channel; we should see if there's a relevant message
-            //      waiting for us on rx.
-            //   2. I/O loop is actually gone.
-            // In either case, recv() will return Err. If it doesn't, we got somehow
-            // got a frame after a send failure - this should be impossible, but return
-            // FrameUnexpected just in case.
-            match self.recv() {
-                Ok(_) => {
-                    error!(
-                        "internal error - received unexpected frame after I/O thread disappeared"
-                    );
-                    ErrorKind::FrameUnexpected.into()
-                }
-                Err(err) => err,
-            }
-        })
-    }
-
-    fn recv(&mut self) -> Result<ChannelMessage> {
-        self.rx
-            .recv()
-            .map_err(|_| Error::from(ErrorKind::EventLoopDropped))?
-    }
-}
-
-struct IoLoopHandle0 {
-    common: IoLoopHandle,
-    blocked_rx: CrossbeamReceiver<ConnectionBlockedNotification>,
-}
-
-impl Deref for IoLoopHandle0 {
-    type Target = IoLoopHandle;
-
-    fn deref(&self) -> &IoLoopHandle {
-        &self.common
-    }
-}
-
-impl DerefMut for IoLoopHandle0 {
-    fn deref_mut(&mut self) -> &mut IoLoopHandle {
-        &mut self.common
     }
 }
 
