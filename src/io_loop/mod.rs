@@ -3,7 +3,7 @@ use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::notification_listeners::NotificationListeners;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
-use crate::{ConsumerMessage, ErrorKind, Result};
+use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
 use amq_protocol::protocol::AMQPClass;
@@ -121,14 +121,15 @@ pub(crate) struct IoLoop {
     poll_timeout: Option<Duration>,
     frame_buffer: FrameBuffer,
     inner: Inner,
+
+    // Bound for buffered outgoing writes. If we have more than this much data enqueued,
+    // we will stop polling non-0 channels' requests for us to send more data.
+    buffered_writes_high_water: usize,
+    buffered_writes_low_water: usize,
 }
 
 impl IoLoop {
-    pub(crate) fn new(
-        stream: TcpStream,
-        mem_channel_bound: usize,
-        poll_timeout: Option<Duration>,
-    ) -> Result<Self> {
+    pub(crate) fn new(stream: TcpStream, tuning: ConnectionTuning) -> Result<Self> {
         let heartbeats = HeartbeatTimers::default();
 
         let poll = Poll::new().context(ErrorKind::Io)?;
@@ -150,9 +151,11 @@ impl IoLoop {
         Ok(IoLoop {
             stream,
             poll,
-            poll_timeout,
             frame_buffer: FrameBuffer::new(),
-            inner: Inner::new(heartbeats, mem_channel_bound),
+            inner: Inner::new(heartbeats, tuning.mem_channel_bound),
+            buffered_writes_high_water: tuning.buffered_writes_high_water,
+            buffered_writes_low_water: tuning.buffered_writes_low_water,
+            poll_timeout: tuning.poll_timeout,
         })
     }
 
@@ -364,6 +367,7 @@ impl IoLoop {
         G: Fn(&Self, &State) -> bool,
     {
         let mut events = Events::with_capacity(128);
+        let mut listening_to_channels = true;
         loop {
             self.poll
                 .poll(&mut events, self.poll_timeout)
@@ -385,6 +389,28 @@ impl IoLoop {
 
             if is_done(self, state) {
                 return Ok(());
+            }
+
+            // Avoid out-of-memory from very fast publishers. If we have more than
+            // buffered_writes_high_water data enqueued to write already, unregister all
+            // channels (other than channel 0), and don't reregister until we're down to
+            // buffered_writes_low_water.
+            if listening_to_channels && self.inner.outbuf.len() > self.buffered_writes_high_water {
+                debug!(
+                    "{} bytes buffered to write; blocking channels internally",
+                    self.inner.outbuf.len()
+                );
+                self.inner.deregister_nonzero_channels(&self.poll)?;
+                listening_to_channels = false;
+            } else if !listening_to_channels
+                && self.inner.outbuf.len() <= self.buffered_writes_low_water
+            {
+                debug!(
+                    "down to {} bytes buffered to write; unblocking channels internally (TODO low water mark)",
+                    self.inner.outbuf.len()
+                );
+                self.inner.reregister_nonzero_channels(&self.poll)?;
+                listening_to_channels = true;
             }
 
             // If we have data to write, reregister for readable|writable. This may be a
@@ -431,6 +457,9 @@ struct Inner {
     // Bound for in-memory channels that send to our I/O thread. (Channels going _from_
     // the I/O thread are unbounded to prevent blocking the I/O thread on slow receviers.)
     mio_channel_bound: usize,
+
+    // If true, non-0 channels are registered with mio. (Channel 0 is always registered.)
+    channels_are_registered: bool,
 }
 
 impl Inner {
@@ -440,6 +469,7 @@ impl Inner {
             heartbeats,
             chan_slots: ChannelSlots::new(),
             mio_channel_bound,
+            channels_are_registered: true,
         }
     }
 
@@ -470,6 +500,28 @@ impl Inner {
     #[inline]
     fn has_data_to_write(&self) -> bool {
         !self.outbuf.is_empty()
+    }
+
+    fn deregister_nonzero_channels(&mut self, poll: &Poll) -> Result<()> {
+        for (_, slot) in self.chan_slots.iter() {
+            poll.deregister(&slot.rx).context(ErrorKind::Io)?;
+        }
+        self.channels_are_registered = false;
+        Ok(())
+    }
+
+    fn reregister_nonzero_channels(&mut self, poll: &Poll) -> Result<()> {
+        for (id, slot) in self.chan_slots.iter() {
+            poll.reregister(
+                &slot.rx,
+                Token(*id as usize),
+                Ready::readable(),
+                PollOpt::edge(),
+            )
+            .context(ErrorKind::Io)?;
+        }
+        self.channels_are_registered = true;
+        Ok(())
     }
 
     fn process_heartbeat_timers(&mut self) -> Result<()> {
@@ -559,6 +611,7 @@ impl Inner {
             };
 
             let mio_channel_bound = self.mio_channel_bound;
+            let channels_are_registered = self.channels_are_registered;
             let result = self.chan_slots.insert(new_channel_id, |new_channel_id| {
                 let (slot, handle) = ChannelSlot::new(mio_channel_bound, new_channel_id);
                 poll.register(
@@ -568,6 +621,14 @@ impl Inner {
                     PollOpt::edge(),
                 )
                 .context(ErrorKind::Io)?;
+                if !channels_are_registered {
+                    // If we're currently in a deregistered state (i.e., too much data to
+                    // write), go ahead and deregister this new channel. We do the register+
+                    // deregister dance so we can call reregister on this new channel even
+                    // though it hadn't existed when we deregistered all the existing
+                    // channels.
+                    poll.deregister(&slot.rx).context(ErrorKind::Io)?;
+                }
                 Ok((slot, handle))
             });
             // safe to unwrap the get() here because we wouldn't be in this method

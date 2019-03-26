@@ -15,7 +15,7 @@ mod serialize;
 
 pub use auth::Auth;
 pub use channel::Channel;
-pub use connection::Connection;
+pub use connection::{Connection, ConnectionTuning};
 pub use connection_options::ConnectionOptions;
 pub use consumer::{Consumer, ConsumerMessage};
 pub use delivery::Delivery;

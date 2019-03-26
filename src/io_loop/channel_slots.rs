@@ -26,6 +26,10 @@ impl<T> ChannelSlots<T> {
         self.slots.drain()
     }
 
+    pub(crate) fn iter(&self) -> impl Iterator<Item=(&u16, &T)> {
+        self.slots.iter()
+    }
+
     pub(crate) fn set_channel_max(&mut self, channel_max: u16) {
         assert!(
             self.slots.is_empty() && self.freed_channel_ids.is_empty(),

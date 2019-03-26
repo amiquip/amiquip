@@ -18,14 +18,61 @@ impl Drop for Connection {
     }
 }
 
+pub struct ConnectionTuning {
+    pub mem_channel_bound: usize,
+    pub buffered_writes_high_water: usize,
+    pub buffered_writes_low_water: usize,
+    pub poll_timeout: Option<Duration>,
+}
+
+impl Default for ConnectionTuning {
+    fn default() -> Self {
+        ConnectionTuning {
+            mem_channel_bound: 16,
+            buffered_writes_high_water: 16 << 20,
+            buffered_writes_low_water: 0,
+            poll_timeout: None,
+        }
+    }
+}
+
+impl ConnectionTuning {
+    pub fn mem_channel_bound(self, mem_channel_bound: usize) -> Self {
+        ConnectionTuning {
+            mem_channel_bound,
+            ..self
+        }
+    }
+
+    pub fn buffered_writes_high_water(self, buffered_writes_high_water: usize) -> Self {
+        ConnectionTuning {
+            buffered_writes_high_water,
+            ..self
+        }
+    }
+
+    pub fn buffered_writes_low_water(self, buffered_writes_low_water: usize) -> Self {
+        ConnectionTuning {
+            buffered_writes_low_water,
+            ..self
+        }
+    }
+
+    pub fn poll_timeout(self, poll_timeout: Option<Duration>) -> Self {
+        ConnectionTuning {
+            poll_timeout,
+            ..self
+        }
+    }
+}
+
 impl Connection {
     pub fn open<Auth: Sasl>(
         stream: TcpStream,
         options: ConnectionOptions<Auth>,
-        mem_channel_bound: usize,
-        poll_timeout: Option<Duration>,
+        tuning: ConnectionTuning,
     ) -> Result<Connection> {
-        let io_loop = IoLoop::new(stream, mem_channel_bound, poll_timeout)?;
+        let io_loop = IoLoop::new(stream, tuning)?;
         let (join_handle, channel0) = io_loop.start(options)?;
         Ok(Connection {
             join_handle: Some(join_handle),
