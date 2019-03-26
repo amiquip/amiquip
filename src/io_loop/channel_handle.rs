@@ -2,7 +2,7 @@ use super::{
     ConnectionBlockedNotification, ConsumerMessage, CrossbeamReceiver, IoLoopHandle, IoLoopHandle0,
 };
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
-use crate::Result;
+use crate::{NotificationListener, Result};
 use amq_protocol::protocol::basic::{AMQPProperties, Consume};
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::channel::Close as ChannelClose;
@@ -11,7 +11,6 @@ use amq_protocol::protocol::channel::Open as ChannelOpen;
 use amq_protocol::protocol::channel::OpenOk as ChannelOpenOk;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::constants::REPLY_SUCCESS;
-use crossbeam_channel::Receiver;
 use log::{debug, trace};
 use std::fmt::Debug;
 
@@ -38,8 +37,10 @@ impl Channel0Handle {
         Channel0Handle { handle, frame_max }
     }
 
-    pub(crate) fn blocked_notifications(&self) -> &Receiver<ConnectionBlockedNotification> {
-        &self.handle.blocked_rx
+    pub(crate) fn register_conn_blocked_listener(
+        &self,
+    ) -> NotificationListener<ConnectionBlockedNotification> {
+        self.handle.register_conn_blocked_listener()
     }
 
     pub(crate) fn close_connection(&mut self) -> Result<()> {

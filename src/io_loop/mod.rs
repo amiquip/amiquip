@@ -1,6 +1,7 @@
 use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
+use crate::notification_listeners::NotificationListeners;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
 use crate::{ConsumerMessage, ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
@@ -76,7 +77,7 @@ impl ChannelSlot {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConnectionBlockedNotification {
     Blocked(String),
     Unblocked,
@@ -84,7 +85,7 @@ pub enum ConnectionBlockedNotification {
 
 struct Channel0Slot {
     common: ChannelSlot,
-    blocked_tx: CrossbeamSender<ConnectionBlockedNotification>,
+    conn_blocked_listeners: NotificationListeners<ConnectionBlockedNotification>,
     alloc_chan_req_rx: MioReceiver<Option<u16>>,
     alloc_chan_rep_tx: CrossbeamSender<Result<IoLoopHandle>>,
 }
@@ -92,19 +93,20 @@ struct Channel0Slot {
 impl Channel0Slot {
     fn new(mio_channel_bound: usize) -> (Channel0Slot, IoLoopHandle0) {
         let (common_slot, common_handle) = ChannelSlot::new(mio_channel_bound, 0);
-        let (blocked_tx, blocked_rx) = crossbeam_channel::unbounded();
         let (alloc_chan_req_tx, alloc_chan_req_rx) = mio_sync_channel(1);
         let (alloc_chan_rep_tx, alloc_chan_rep_rx) = crossbeam_channel::bounded(1);
 
+        let conn_blocked_listeners = NotificationListeners::new();
+
         let slot = Channel0Slot {
             common: common_slot,
-            blocked_tx,
+            conn_blocked_listeners: conn_blocked_listeners.clone(),
             alloc_chan_req_rx,
             alloc_chan_rep_tx,
         };
         let handle = IoLoopHandle0::new(
             common_handle,
-            blocked_rx,
+            conn_blocked_listeners,
             alloc_chan_req_tx,
             alloc_chan_rep_rx,
         );

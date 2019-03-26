@@ -1,4 +1,5 @@
 use super::{ChannelMessage, ConnectionBlockedNotification, ConsumerMessage, IoLoopMessage};
+use crate::notification_listeners::{NotificationListener, NotificationListeners};
 use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass};
 use crate::{AmqpProperties, Error, ErrorKind, Result};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
@@ -133,7 +134,7 @@ impl IoLoopHandle {
 
 pub(super) struct IoLoopHandle0 {
     common: IoLoopHandle,
-    pub(super) blocked_rx: CrossbeamReceiver<ConnectionBlockedNotification>,
+    conn_blocked_listeners: NotificationListeners<ConnectionBlockedNotification>,
     alloc_chan_req_tx: MioSyncSender<Option<u16>>,
     alloc_chan_rep_rx: CrossbeamReceiver<Result<IoLoopHandle>>,
 }
@@ -141,13 +142,13 @@ pub(super) struct IoLoopHandle0 {
 impl IoLoopHandle0 {
     pub(super) fn new(
         common: IoLoopHandle,
-        blocked_rx: CrossbeamReceiver<ConnectionBlockedNotification>,
+        conn_blocked_listeners: NotificationListeners<ConnectionBlockedNotification>,
         alloc_chan_req_tx: MioSyncSender<Option<u16>>,
         alloc_chan_rep_rx: CrossbeamReceiver<Result<IoLoopHandle>>,
     ) -> IoLoopHandle0 {
         IoLoopHandle0 {
             common,
-            blocked_rx,
+            conn_blocked_listeners,
             alloc_chan_req_tx,
             alloc_chan_rep_rx,
         }
@@ -160,6 +161,12 @@ impl IoLoopHandle0 {
         self.alloc_chan_rep_rx
             .recv()
             .map_err(|_| Error::from(ErrorKind::EventLoopDropped))?
+    }
+
+    pub(super) fn register_conn_blocked_listener(
+        &self,
+    ) -> NotificationListener<ConnectionBlockedNotification> {
+        self.conn_blocked_listeners.register_listener()
     }
 }
 

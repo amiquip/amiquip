@@ -108,12 +108,14 @@ impl ConnectionState {
             // Server is blocking publishes due to an alarm on its side (e.g., low mem)
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Blocked(blocked))) => {
                 warn!("server has blocked connection; reason = {}", blocked.reason);
-                send(&ch0_slot.blocked_tx, ConnectionBlockedNotification::Blocked(blocked.reason))?;
+                let note = ConnectionBlockedNotification::Blocked(blocked.reason);
+                ch0_slot.conn_blocked_listeners.broadcast(note);
             }
             // Server has unblocked publishes
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Unblocked(_))) => {
                 warn!("server has unblocked connection");
-                send(&ch0_slot.blocked_tx, ConnectionBlockedNotification::Unblocked)?;
+                let note = ConnectionBlockedNotification::Unblocked;
+                ch0_slot.conn_blocked_listeners.broadcast(note);
             }
             // TODO handle other expected channel 0 methods
             AMQPFrame::Method(0, other) => {
