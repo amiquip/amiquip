@@ -81,6 +81,11 @@ impl_try_from_class!(
     AMQPClass::Basic,
     AmqpBasic::CancelOk
 );
+impl_try_from_class!(
+    amq_protocol::protocol::basic::QosOk,
+    AMQPClass::Basic,
+    AmqpBasic::QosOk
+);
 
 pub(crate) trait TryFromAmqpFrame: Sized {
     fn try_from(channel_id: u16, frame: AMQPFrame) -> Result<Self>;

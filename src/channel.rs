@@ -1,7 +1,9 @@
 use crate::io_loop::ChannelHandle;
 use crate::{Consumer, Delivery, ErrorKind, Result};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
-use amq_protocol::protocol::basic::{AMQPProperties, Ack, Cancel, CancelOk, Consume, Publish};
+use amq_protocol::protocol::basic::{
+    AMQPProperties, Ack, Cancel, CancelOk, Consume, Publish, Qos, QosOk,
+};
 use amq_protocol::types::FieldTable;
 use log::{debug, trace};
 use std::sync::{Arc, Mutex};
@@ -20,6 +22,19 @@ impl Channel {
     pub fn close(self) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
         inner.close()
+    }
+
+    pub fn basic_qos(&self, prefetch_size: u32, prefetch_count: u16, global: bool) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        let handle = inner.get_handle_mut()?;
+
+        handle
+            .call::<_, QosOk>(AmqpBasic::Qos(Qos {
+                prefetch_size,
+                prefetch_count,
+                global,
+            }))
+            .map(|_qos_ok| ())
     }
 
     pub fn basic_publish<T: AsRef<[u8]>, S0: Into<String>, S1: Into<String>>(
