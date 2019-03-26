@@ -3,7 +3,7 @@ use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::notification_listeners::NotificationListeners;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
-use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, Result};
+use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, IoStream, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
 use amq_protocol::protocol::AMQPClass;
@@ -12,8 +12,7 @@ use crossbeam_channel::SendError;
 use crossbeam_channel::Sender as CrossbeamSender;
 use failure::{Fail, ResultExt};
 use log::{debug, error, trace, warn};
-use mio::net::TcpStream;
-use mio::{Event, Events, Poll, PollOpt, Ready, Token};
+use mio::{Event, Evented, Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::sync_channel as mio_sync_channel;
 use mio_extras::channel::Receiver as MioReceiver;
 use std::collections::hash_map::HashMap;
@@ -150,9 +149,9 @@ impl IoLoop {
         })
     }
 
-    pub(crate) fn start<Auth: Sasl>(
+    pub(crate) fn start<Auth: Sasl, S: IoStream>(
         self,
-        stream: TcpStream,
+        stream: S,
         options: ConnectionOptions<Auth>,
     ) -> Result<(JoinHandle<Result<()>>, Channel0Handle)> {
         self.poll
@@ -187,9 +186,9 @@ impl IoLoop {
         }
     }
 
-    fn thread_main<Auth: Sasl>(
+    fn thread_main<Auth: Sasl, S: IoStream>(
         mut self,
-        mut stream: TcpStream,
+        mut stream: S,
         options: ConnectionOptions<Auth>,
         handshake_done_tx: crossbeam_channel::Sender<usize>,
         ch0_slot: Channel0Slot,
@@ -220,9 +219,9 @@ impl IoLoop {
         self.run_connection(&mut stream, ch0_slot)
     }
 
-    fn run_handshake<Auth: Sasl>(
+    fn run_handshake<Auth: Sasl, S: IoStream>(
         &mut self,
-        stream: &mut TcpStream,
+        stream: &mut S,
         options: ConnectionOptions<Auth>,
     ) -> Result<TuneOk> {
         let mut state = HandshakeState::Start(options);
@@ -245,9 +244,9 @@ impl IoLoop {
         }
     }
 
-    fn handle_handshake_event<Auth: Sasl>(
+    fn handle_handshake_event<Auth: Sasl, S: IoStream>(
         &mut self,
-        stream: &mut TcpStream,
+        stream: &mut S,
         state: &mut HandshakeState<Auth>,
         event: Event,
     ) -> Result<()> {
@@ -288,7 +287,11 @@ impl IoLoop {
         }
     }
 
-    fn run_connection(&mut self, stream: &mut TcpStream, ch0_slot: Channel0Slot) -> Result<()> {
+    fn run_connection<S: IoStream>(
+        &mut self,
+        stream: &mut S,
+        ch0_slot: Channel0Slot,
+    ) -> Result<()> {
         let mut state = ConnectionState::Steady(ch0_slot);
         self.run_io_loop(
             stream,
@@ -307,9 +310,9 @@ impl IoLoop {
         }
     }
 
-    fn handle_steady_event(
+    fn handle_steady_event<S: IoStream>(
         &mut self,
-        stream: &mut TcpStream,
+        stream: &mut S,
         state: &mut ConnectionState,
         event: Event,
     ) -> Result<()> {
@@ -369,15 +372,16 @@ impl IoLoop {
         }
     }
 
-    fn run_io_loop<State, F, G>(
+    fn run_io_loop<State, S, F, G>(
         &mut self,
-        stream: &mut TcpStream,
+        stream: &mut S,
         state: &mut State,
         mut handle_event: F,
         is_done: G,
     ) -> Result<()>
     where
-        F: FnMut(&mut Self, &mut TcpStream, &mut State, Event) -> Result<()>,
+        S: Evented,
+        F: FnMut(&mut Self, &mut S, &mut State, Event) -> Result<()>,
         G: Fn(&Self, &State) -> bool,
     {
         let mut events = Events::with_capacity(128);
@@ -667,7 +671,7 @@ impl Inner {
         mut handler: F,
     ) -> Result<()>
     where
-        S: io::Read,
+        S: IoStream,
         F: FnMut(&mut Inner, AMQPFrame) -> Result<()>,
     {
         let n = frame_buffer.read_from(stream, |frame| {
@@ -680,7 +684,7 @@ impl Inner {
         Ok(())
     }
 
-    fn write_to_stream<S: io::Write>(&mut self, stream: &mut S) -> Result<()> {
+    fn write_to_stream<S: IoStream>(&mut self, stream: &mut S) -> Result<()> {
         let len = self.outbuf.len();
         let mut pos = 0;
 

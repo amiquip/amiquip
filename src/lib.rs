@@ -12,6 +12,7 @@ mod heartbeats;
 mod io_loop;
 mod notification_listeners;
 mod serialize;
+mod stream;
 
 pub use auth::Auth;
 pub use channel::Channel;
@@ -23,6 +24,7 @@ pub use errors::ArcError as Error;
 pub use errors::{ErrorKind, Result};
 pub use io_loop::ConnectionBlockedNotification;
 pub use notification_listeners::NotificationListener;
+pub use stream::IoStream;
 
 pub use amq_protocol::protocol::basic::AMQPProperties as AmqpProperties;
 
