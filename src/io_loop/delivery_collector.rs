@@ -21,12 +21,20 @@ impl DeliveryCollector {
         }
     }
 
-    pub(super) fn collect_header(&mut self, header: AMQPContentHeader) -> Result<()> {
+    pub(super) fn collect_header(
+        &mut self,
+        header: AMQPContentHeader,
+    ) -> Result<Option<(String, Delivery)>> {
         match self.state.take() {
             Some(State::Deliver(deliver)) => {
-                let buf = Vec::with_capacity(header.body_size as usize);
-                self.state = Some(State::Body(deliver, header, buf));
-                Ok(())
+                if header.body_size == 0 {
+                    self.state = None;
+                    Ok(Some(Delivery::new(deliver, Vec::new(), header.properties)))
+                } else {
+                    let buf = Vec::with_capacity(header.body_size as usize);
+                    self.state = Some(State::Body(deliver, header, buf));
+                    Ok(None)
+                }
             }
             None | Some(State::Body(_, _, _)) => Err(ErrorKind::FrameUnexpected)?,
         }

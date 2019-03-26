@@ -227,7 +227,13 @@ impl ConnectionState {
             // Server sending content header as part of a deliver.
             AMQPFrame::Header(n, _, header) => {
                 let slot = slot_get_mut(inner, n)?;
-                slot.collector.collect_header(*header)?;
+                if let Some((consumer_tag, delivery)) = slot.collector.collect_header(*header)? {
+                    let tx = slot
+                        .consumers
+                        .get(&consumer_tag)
+                        .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
+                    send(tx, ConsumerMessage::Delivery(delivery))?;
+                }
             }
             // Server sending content body as part of a deliver.
             AMQPFrame::Body(n, body) => {
