@@ -34,7 +34,7 @@ impl Channel {
         let mut inner = self.inner.lock().unwrap();
         let handle = inner.get_handle_mut()?;
 
-        handle.send_nowait(AmqpBasic::Publish(Publish {
+        handle.call_nowait(AmqpBasic::Publish(Publish {
             ticket: 0,
             exchange: exchange.into(),
             routing_key: routing_key.into(),
@@ -71,7 +71,7 @@ impl Channel {
         let mut inner = self.inner.lock().unwrap();
         let handle = inner.get_handle_mut()?;
 
-        handle.send_nowait(AmqpBasic::Ack(Ack {
+        handle.call_nowait(AmqpBasic::Ack(Ack {
             delivery_tag: delivery.delivery_tag(),
             multiple,
         }))

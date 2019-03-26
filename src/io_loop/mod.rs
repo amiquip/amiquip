@@ -39,28 +39,16 @@ use io_loop_handle::{IoLoopHandle, IoLoopHandle0};
 
 const STREAM: Token = Token(u16::max_value() as usize + 1);
 const HEARTBEAT: Token = Token(u16::max_value() as usize + 2);
+const ALLOC_CHANNEL: Token = Token(u16::max_value() as usize + 3);
 
-#[derive(Debug)]
-enum IoLoopRpc {
-    ConnectionClose(OutputBuffer),
-    Send(OutputBuffer),
-}
-
-#[derive(Debug)]
-enum IoLoopCommand {
-    AllocateChannel(Option<u16>, CrossbeamSender<Result<IoLoopHandle>>),
-}
-
-#[derive(Debug)]
 enum IoLoopMessage {
-    Rpc(IoLoopRpc),
-    Command(IoLoopCommand),
+    Send(OutputBuffer),
+    ConnectionClose(OutputBuffer),
 }
 
-#[derive(Debug)]
 enum ChannelMessage {
-    ConsumeOk(String, CrossbeamReceiver<ConsumerMessage>),
     Method(AMQPClass),
+    ConsumeOk(String, CrossbeamReceiver<ConsumerMessage>),
 }
 
 struct ChannelSlot {
@@ -97,18 +85,29 @@ pub enum ConnectionBlockedNotification {
 struct Channel0Slot {
     common: ChannelSlot,
     blocked_tx: CrossbeamSender<ConnectionBlockedNotification>,
+    alloc_chan_req_rx: MioReceiver<Option<u16>>,
+    alloc_chan_rep_tx: CrossbeamSender<Result<IoLoopHandle>>,
 }
 
 impl Channel0Slot {
     fn new(mio_channel_bound: usize) -> (Channel0Slot, IoLoopHandle0) {
         let (common_slot, common_handle) = ChannelSlot::new(mio_channel_bound, 0);
         let (blocked_tx, blocked_rx) = crossbeam_channel::unbounded();
+        let (alloc_chan_req_tx, alloc_chan_req_rx) = mio_sync_channel(1);
+        let (alloc_chan_rep_tx, alloc_chan_rep_rx) = crossbeam_channel::bounded(1);
 
         let slot = Channel0Slot {
             common: common_slot,
             blocked_tx,
+            alloc_chan_req_rx,
+            alloc_chan_rep_tx,
         };
-        let handle = IoLoopHandle0::new(common_handle, blocked_rx);
+        let handle = IoLoopHandle0::new(
+            common_handle,
+            blocked_rx,
+            alloc_chan_req_tx,
+            alloc_chan_rep_rx,
+        );
 
         (slot, handle)
     }
@@ -193,6 +192,14 @@ impl IoLoop {
             .register(
                 &ch0_slot.common.rx,
                 Token(0),
+                Ready::readable(),
+                PollOpt::edge(),
+            )
+            .context(ErrorKind::Io)?;
+        self.poll
+            .register(
+                &ch0_slot.alloc_chan_req_rx,
+                ALLOC_CHANNEL,
                 Ready::readable(),
                 PollOpt::edge(),
             )
@@ -302,9 +309,19 @@ impl IoLoop {
                 }
             }
             HEARTBEAT => self.inner.process_heartbeat_timers()?,
+            ALLOC_CHANNEL => match &state {
+                ConnectionState::Steady(ch0_slot) => {
+                    self.inner.allocate_channel(ch0_slot, &self.poll)?
+                }
+                ConnectionState::ServerClosing(_)
+                | ConnectionState::ClientException
+                | ConnectionState::ClientClosed => {
+                    unreachable!("ch0 slot cannot be readable after it is dropped")
+                }
+            },
             Token(0) => match &state {
                 ConnectionState::Steady(ch0_slot) => {
-                    self.inner.handle_channel0_readable(ch0_slot, &self.poll)?
+                    self.inner.handle_channel0_readable(ch0_slot)?
                 }
                 ConnectionState::ServerClosing(_)
                 | ConnectionState::ClientException
@@ -313,7 +330,7 @@ impl IoLoop {
                 }
             },
             Token(n) if n <= u16::max_value() as usize => {
-                self.inner.handle_channel_readable(n as u16, &self.poll)?
+                self.inner.handle_channel_readable(n as u16)?
             }
             _ => unreachable!(),
         })
@@ -485,15 +502,17 @@ impl Inner {
         Ok(())
     }
 
-    fn handle_channel0_readable(&mut self, ch0_slot: &Channel0Slot, poll: &Poll) -> Result<()> {
-        match ch0_slot.common.rx.try_recv() {
-            Ok(message) => self.process_channel_message(message, poll),
-            Err(TryRecvError::Empty) => Ok(()),
-            Err(TryRecvError::Disconnected) => Err(ErrorKind::EventLoopClientDropped)?,
+    fn handle_channel0_readable(&mut self, ch0_slot: &Channel0Slot) -> Result<()> {
+        loop {
+            match ch0_slot.common.rx.try_recv() {
+                Ok(message) => self.process_channel_message(message)?,
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) => Err(ErrorKind::EventLoopClientDropped)?,
+            }
         }
     }
 
-    fn handle_channel_readable(&mut self, channel_id: u16, poll: &Poll) -> Result<()> {
+    fn handle_channel_readable(&mut self, channel_id: u16) -> Result<()> {
         loop {
             let slot = match self.chan_slots.get(channel_id) {
                 Some(slot) => slot,
@@ -509,48 +528,59 @@ impl Inner {
                 }
             };
             match slot.rx.try_recv() {
-                Ok(message) => self.process_channel_message(message, poll)?,
+                Ok(message) => self.process_channel_message(message)?,
                 Err(TryRecvError::Empty) => return Ok(()),
                 Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
             }
         }
     }
 
-    fn process_channel_message(&mut self, message: IoLoopMessage, poll: &Poll) -> Result<()> {
+    fn process_channel_message(&mut self, message: IoLoopMessage) -> Result<()> {
         match message {
-            IoLoopMessage::Rpc(IoLoopRpc::ConnectionClose(buf)) => {
+            IoLoopMessage::ConnectionClose(buf) => {
                 self.outbuf.append(buf);
                 self.seal_writes();
             }
-            IoLoopMessage::Rpc(IoLoopRpc::Send(buf)) => {
+            IoLoopMessage::Send(buf) => {
                 self.outbuf.append(buf);
-            }
-            IoLoopMessage::Command(IoLoopCommand::AllocateChannel(channel_id, tx)) => {
-                let mio_channel_bound = self.mio_channel_bound;
-                let result = self.chan_slots.insert(channel_id, |channel_id| {
-                    let (slot, handle) = ChannelSlot::new(mio_channel_bound, channel_id);
-                    poll.register(
-                        &slot.rx,
-                        Token(channel_id as usize),
-                        Ready::readable(),
-                        PollOpt::edge(),
-                    )
-                    .context(ErrorKind::Io)?;
-                    Ok((slot, handle))
-                });
-                match tx.send(result) {
-                    Ok(()) => (),
-                    Err(SendError(Ok(handle))) => {
-                        // send failed - clear the allocated channel
-                        self.chan_slots.remove(handle.channel_id);
-                    }
-                    Err(SendError(Err(_))) => {
-                        // send failed, but so did channel creation. do nothing
-                    }
-                }
             }
         }
         Ok(())
+    }
+
+    fn allocate_channel(&mut self, ch0_slot: &Channel0Slot, poll: &Poll) -> Result<()> {
+        loop {
+            let new_channel_id = match ch0_slot.alloc_chan_req_rx.try_recv() {
+                Ok(new_channel_id) => new_channel_id,
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
+            };
+
+            let mio_channel_bound = self.mio_channel_bound;
+            let result = self.chan_slots.insert(new_channel_id, |new_channel_id| {
+                let (slot, handle) = ChannelSlot::new(mio_channel_bound, new_channel_id);
+                poll.register(
+                    &slot.rx,
+                    Token(new_channel_id as usize),
+                    Ready::readable(),
+                    PollOpt::edge(),
+                )
+                .context(ErrorKind::Io)?;
+                Ok((slot, handle))
+            });
+            // safe to unwrap the get() here because we wouldn't be in this method
+            // at all if we didn't have a slot that just received this message.
+            match ch0_slot.alloc_chan_rep_tx.send(result) {
+                Ok(()) => (),
+                Err(SendError(Ok(handle))) => {
+                    // send failed - clear the allocated channel
+                    self.chan_slots.remove(handle.channel_id());
+                }
+                Err(SendError(Err(_))) => {
+                    // send failed, but so did channel creation. do nothing
+                }
+            }
+        }
     }
 
     fn read_from_stream<S, F>(

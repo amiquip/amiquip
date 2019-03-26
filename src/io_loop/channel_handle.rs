@@ -1,18 +1,15 @@
 use super::{
-    ConnectionBlockedNotification, ConsumerMessage, CrossbeamReceiver, IoLoopCommand, IoLoopHandle,
-    IoLoopHandle0, IoLoopRpc,
+    ConnectionBlockedNotification, ConsumerMessage, CrossbeamReceiver, IoLoopHandle, IoLoopHandle0,
 };
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
-use crate::{Error, ErrorKind, Result};
+use crate::Result;
 use amq_protocol::protocol::basic::{AMQPProperties, Consume};
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::channel::Close as ChannelClose;
 use amq_protocol::protocol::channel::CloseOk as ChannelCloseOk;
 use amq_protocol::protocol::channel::Open as ChannelOpen;
 use amq_protocol::protocol::channel::OpenOk as ChannelOpenOk;
-use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
-use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
 use amq_protocol::protocol::constants::REPLY_SUCCESS;
 use crossbeam_channel::Receiver;
 use log::{debug, trace};
@@ -31,7 +28,7 @@ pub(crate) struct Channel0Handle {
 impl Channel0Handle {
     pub(super) fn new(handle: IoLoopHandle0, mut frame_max: usize) -> Channel0Handle {
         assert!(
-            handle.channel_id == 0,
+            handle.channel_id() == 0,
             "handle for Channel0 must be channel 0"
         );
         if frame_max == 0 {
@@ -46,31 +43,19 @@ impl Channel0Handle {
     }
 
     pub(crate) fn close_connection(&mut self) -> Result<()> {
-        debug_assert!(self.handle.buf.is_empty());
-        let close = AmqpConnection::Close(ConnectionClose {
+        let close = ConnectionClose {
             reply_code: REPLY_SUCCESS as u16,
             reply_text: "goodbye".to_string(),
             class_id: 0,
             method_id: 0,
-        });
-
-        let buf = self.handle.make_buf(close)?;
-        self.handle
-            .call_rpc::<ConnectionCloseOk>(IoLoopRpc::ConnectionClose(buf))?;
-        Ok(())
+        };
+        self.handle.call_connection_close(close).map(|_| ())
     }
 
     pub(crate) fn open_channel(&mut self, channel_id: Option<u16>) -> Result<ChannelHandle> {
-        let (tx, rx) = crossbeam_channel::bounded(1);
-        self.handle
-            .send_command(IoLoopCommand::AllocateChannel(channel_id, tx))?;
+        let mut handle = self.handle.allocate_channel(channel_id)?;
 
-        // double ?? - peel off recv error then channel allocation error
-        let mut handle = rx
-            .recv()
-            .map_err(|_| Error::from(ErrorKind::EventLoopDropped))??;
-
-        debug!("opening channel {}", handle.channel_id);
+        debug!("opening channel {}", handle.channel_id());
         let out_of_band = String::new();
         let open = AmqpChannel::Open(ChannelOpen { out_of_band });
 
@@ -96,10 +81,15 @@ impl ChannelHandle {
             class_id: 0,
             method_id: 0,
         });
-        debug!("closing channel {}", self.handle.channel_id);
+        debug!("closing channel {}", self.channel_id());
         let close_ok = self.handle.call::<_, ChannelCloseOk>(close)?;
         trace!("got close-ok: {:?}", close_ok);
         Ok(())
+    }
+
+    #[inline]
+    fn channel_id(&self) -> u16 {
+        self.handle.channel_id()
     }
 
     pub(crate) fn consume(
@@ -108,7 +98,7 @@ impl ChannelHandle {
     ) -> Result<(String, CrossbeamReceiver<ConsumerMessage>)> {
         trace!(
             "starting consumer on channel {}: {:?}",
-            self.handle.channel_id,
+            self.channel_id(),
             consume
         );
         self.handle.consume(consume)
@@ -120,19 +110,19 @@ impl ChannelHandle {
     ) -> Result<T> {
         trace!(
             "calling rpc method on channel {}: {:?}",
-            self.handle.channel_id,
+            self.channel_id(),
             method
         );
         self.handle.call(method)
     }
 
-    pub(crate) fn send_nowait<M: IntoAmqpClass + Debug>(&mut self, method: M) -> Result<()> {
+    pub(crate) fn call_nowait<M: IntoAmqpClass + Debug>(&mut self, method: M) -> Result<()> {
         trace!(
-            "sending method on channel {} without expecting a response: {:?}",
-            self.handle.channel_id,
+            "calling method on channel {} without expecting a response: {:?}",
+            self.channel_id(),
             method
         );
-        self.handle.send_nowait(method)
+        self.handle.call_nowait(method)
     }
 
     pub(crate) fn send_content(
@@ -143,7 +133,7 @@ impl ChannelHandle {
     ) -> Result<()> {
         trace!(
             "sending content header on channel {} (class_id = {}, len = {})",
-            self.handle.channel_id,
+            self.channel_id(),
             class_id,
             content.len()
         );
@@ -153,7 +143,7 @@ impl ChannelHandle {
         while content.len() > self.frame_max {
             trace!(
                 "sending partial content body frame on channel {} (len = {})",
-                self.handle.channel_id,
+                self.channel_id(),
                 self.frame_max
             );
             self.handle.send_content_body(&content[..self.frame_max])?;
@@ -161,7 +151,7 @@ impl ChannelHandle {
         }
         trace!(
             "sending final content body frame on channel {} (len = {})",
-            self.handle.channel_id,
+            self.channel_id(),
             content.len()
         );
         self.handle.send_content_body(content)
