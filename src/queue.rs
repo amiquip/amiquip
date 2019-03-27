@@ -54,4 +54,8 @@ impl Queue<'_> {
         self.channel
             .queue_unbind(self.name(), exchange.name(), routing_key, arguments)
     }
+
+    pub fn purge(&self, nowait: bool) -> Result<Option<u32>> {
+        self.channel.queue_purge(self.name(), nowait)
+    }
 }

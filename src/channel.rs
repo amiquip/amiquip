@@ -13,10 +13,12 @@ use amq_protocol::protocol::exchange::DeclareOk as ExchangeDeclareOk;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::queue::Bind as QueueBind;
 use amq_protocol::protocol::queue::BindOk as QueueBindOk;
-use amq_protocol::protocol::queue::Unbind as QueueUnbind;
-use amq_protocol::protocol::queue::UnbindOk as QueueUnbindOk;
 use amq_protocol::protocol::queue::Declare as QueueDeclare;
 use amq_protocol::protocol::queue::DeclareOk as QueueDeclareOk;
+use amq_protocol::protocol::queue::Purge as QueuePurge;
+use amq_protocol::protocol::queue::PurgeOk as QueuePurgeOk;
+use amq_protocol::protocol::queue::Unbind as QueueUnbind;
+use amq_protocol::protocol::queue::UnbindOk as QueueUnbindOk;
 use amq_protocol::types::FieldTable;
 use log::{debug, trace};
 use std::cell::RefCell;
@@ -197,6 +199,24 @@ impl Channel {
 
         debug!("unbinding queue from exchange: {:?}", unbind);
         handle.call::<_, QueueUnbindOk>(unbind).map(|_| ())
+    }
+
+    pub fn queue_purge<S: Into<String>>(&self, queue: S, nowait: bool) -> Result<Option<u32>> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        let purge = AmqpQueue::Purge(QueuePurge {
+            ticket: 0,
+            queue: queue.into(),
+            nowait,
+        });
+
+        debug!("purging queue: {:?}", purge);
+        if nowait {
+            handle.call_nowait(purge).map(|()| None)
+        } else {
+            handle.call::<_, QueuePurgeOk>(purge).map(|ok| Some(ok.message_count))
+        }
     }
 
     pub fn exchange_declare<S: Into<String>>(
