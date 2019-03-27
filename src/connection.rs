@@ -1,11 +1,15 @@
 use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::io_loop::{Channel0Handle, IoLoop};
-use crate::{Channel, ConnectionBlockedNotification, ErrorKind, NotificationListener, Result};
+use crate::{
+    Channel, ConnectionBlockedNotification, ErrorKind, IoStream, NotificationListener, Result,
+};
 use log::debug;
-use mio::net::TcpStream;
 use std::thread::JoinHandle;
 use std::time::Duration;
+
+#[cfg(feature = "native-tls")]
+use crate::TlsConnector;
 
 pub struct Connection {
     join_handle: Option<JoinHandle<Result<()>>>,
@@ -67,13 +71,30 @@ impl ConnectionTuning {
 }
 
 impl Connection {
-    pub fn open<Auth: Sasl>(
-        stream: TcpStream,
+    pub fn open<Auth: Sasl, S: IoStream>(
+        stream: S,
         options: ConnectionOptions<Auth>,
         tuning: ConnectionTuning,
     ) -> Result<Connection> {
         let io_loop = IoLoop::new(tuning)?;
         let (join_handle, channel0) = io_loop.start(stream, options)?;
+        Ok(Connection {
+            join_handle: Some(join_handle),
+            channel0,
+        })
+    }
+
+    #[cfg(feature = "native-tls")]
+    pub fn open_tls<Auth: Sasl, C: Into<TlsConnector>, S: IoStream>(
+        connector: C,
+        domain: &str,
+        stream: S,
+        options: ConnectionOptions<Auth>,
+        tuning: ConnectionTuning,
+    ) -> Result<Connection> {
+        let stream = connector.into().connect(domain, stream)?;
+        let io_loop = IoLoop::new(tuning)?;
+        let (join_handle, channel0) = io_loop.start_tls(stream, options)?;
         Ok(Connection {
             join_handle: Some(join_handle),
             channel0,

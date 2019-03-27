@@ -26,6 +26,9 @@ pub use io_loop::ConnectionBlockedNotification;
 pub use notification_listeners::NotificationListener;
 pub use stream::IoStream;
 
+#[cfg(feature = "native-tls")]
+pub use stream::TlsConnector;
+
 pub use amq_protocol::protocol::basic::AMQPProperties as AmqpProperties;
 
 #[allow(dead_code)]

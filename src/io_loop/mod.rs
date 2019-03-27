@@ -3,7 +3,8 @@ use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::notification_listeners::NotificationListeners;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
-use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, IoStream, Result};
+use crate::stream::{HandshakeStream, IoStream};
+use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, Result};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
 use amq_protocol::protocol::AMQPClass;
@@ -171,6 +172,39 @@ impl IoLoop {
             .spawn(move || self.thread_main(stream, options, handshake_done_tx, ch0_slot))
             .context(ErrorKind::ForkFailed)?;
 
+        IoLoop::wait_for_amqp_handshake(ch0_handle, join_handle, handshake_done_rx)
+    }
+
+    pub(crate) fn start_tls<Auth: Sasl, S: HandshakeStream>(
+        self,
+        stream: S,
+        options: ConnectionOptions<Auth>,
+    ) -> Result<(JoinHandle<Result<()>>, Channel0Handle)> {
+        self.poll
+            .register(
+                &stream,
+                STREAM,
+                Ready::readable() | Ready::writable(),
+                PollOpt::edge(),
+            )
+            .context(ErrorKind::Io)?;
+
+        let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
+        let (ch0_slot, ch0_handle) = Channel0Slot::new(self.inner.mio_channel_bound);
+
+        let join_handle = Builder::new()
+            .name("amiquip-io".to_string())
+            .spawn(move || self.thread_main_tls(stream, options, handshake_done_tx, ch0_slot))
+            .context(ErrorKind::ForkFailed)?;
+
+        IoLoop::wait_for_amqp_handshake(ch0_handle, join_handle, handshake_done_rx)
+    }
+
+    fn wait_for_amqp_handshake(
+        ch0_handle: IoLoopHandle0,
+        join_handle: JoinHandle<Result<()>>,
+        handshake_done_rx: CrossbeamReceiver<usize>,
+    ) -> Result<(JoinHandle<Result<()>>, Channel0Handle)> {
         match handshake_done_rx.recv() {
             Ok(frame_max) => Ok((join_handle, Channel0Handle::new(ch0_handle, frame_max))),
 
@@ -184,6 +218,28 @@ impl IoLoop {
                 Err(err) => Err(ErrorKind::IoThreadPanic(format!("{:?}", err)).into()),
             },
         }
+    }
+
+    fn thread_main_tls<Auth: Sasl, S: HandshakeStream>(
+        mut self,
+        stream: S,
+        options: ConnectionOptions<Auth>,
+        handshake_done_tx: crossbeam_channel::Sender<usize>,
+        ch0_slot: Channel0Slot,
+    ) -> Result<()> {
+        let stream = self.run_tls_handshake(stream)?;
+        self.thread_main(stream, options, handshake_done_tx, ch0_slot)
+    }
+
+    fn run_tls_handshake<S: HandshakeStream>(&mut self, mut stream: S) -> Result<S::Stream> {
+        let mut state = None;
+        self.run_io_loop(&mut stream, &mut state, |_, stream, state, _| {
+            if state.is_none() {
+                *state = stream.progress_handshake()?;
+            }
+            Ok(())
+        }, |_, state| state.is_some())?;
+        Ok(state.unwrap())
     }
 
     fn thread_main<Auth: Sasl, S: IoStream>(
@@ -209,7 +265,7 @@ impl IoLoop {
                 PollOpt::edge(),
             )
             .context(ErrorKind::Io)?;
-        let tune_ok = self.run_handshake(&mut stream, options)?;
+        let tune_ok = self.run_amqp_handshake(&mut stream, options)?;
         let channel_max = tune_ok.channel_max;
         match handshake_done_tx.send(tune_ok.frame_max as usize) {
             Ok(_) => (),
@@ -219,7 +275,7 @@ impl IoLoop {
         self.run_connection(&mut stream, ch0_slot)
     }
 
-    fn run_handshake<Auth: Sasl, S: IoStream>(
+    fn run_amqp_handshake<Auth: Sasl, S: IoStream>(
         &mut self,
         stream: &mut S,
         options: ConnectionOptions<Auth>,
