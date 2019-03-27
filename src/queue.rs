@@ -5,7 +5,6 @@ pub struct Queue<'a> {
     name: String,
 }
 
-#[derive(Default)]
 pub struct QueueDeclareOptions {
     pub durable: bool,
     pub exclusive: bool,

@@ -114,8 +114,11 @@ impl Channel {
         // per spec, if passive is set all other fields are ignored except nowait (which
         // must be false to be meaningful)
         let options = QueueDeclareOptions {
+            durable: false,
+            exclusive: false,
+            auto_delete: false,
             nowait: false,
-            ..QueueDeclareOptions::default()
+            arguments: FieldTable::new(),
         };
         self.queue_declare_common(queue, true, options)
     }
@@ -231,8 +234,12 @@ impl Channel {
         // per spec, if passive is set all other fields are ignored except nowait (which
         // must be false to be meaningful)
         let options = ExchangeDeclareOptions {
+            type_: ExchangeType::Direct,
+            durable: false,
+            auto_delete: false,
+            internal: false,
             nowait: false,
-            ..ExchangeDeclareOptions::default()
+            arguments: FieldTable::new(),
         };
         self.exchange_declare_common(exchange, true, options)
     }

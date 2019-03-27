@@ -8,12 +8,6 @@ pub enum ExchangeType {
     Custom(String),
 }
 
-impl Default for ExchangeType {
-    fn default() -> ExchangeType {
-        ExchangeType::Direct
-    }
-}
-
 impl AsRef<str> for ExchangeType {
     fn as_ref(&self) -> &str {
         use self::ExchangeType::*;
@@ -27,7 +21,6 @@ impl AsRef<str> for ExchangeType {
     }
 }
 
-#[derive(Default)]
 pub struct ExchangeDeclareOptions {
     pub type_: ExchangeType,
     pub durable: bool,
