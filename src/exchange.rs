@@ -47,6 +47,10 @@ impl Exchange<'_> {
         Exchange { channel, name }
     }
 
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn publish<T: AsRef<[u8]>, S: Into<String>>(
         &self,
         content: T,
@@ -57,7 +61,7 @@ impl Exchange<'_> {
     ) -> Result<()> {
         self.channel.basic_publish(
             content,
-            self.name.clone(),
+            self.name(),
             routing_key,
             mandatory,
             immediate,

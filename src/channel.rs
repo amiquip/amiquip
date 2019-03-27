@@ -11,6 +11,8 @@ use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::exchange::Declare as ExchangeDeclare;
 use amq_protocol::protocol::exchange::DeclareOk as ExchangeDeclareOk;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
+use amq_protocol::protocol::queue::Bind as QueueBind;
+use amq_protocol::protocol::queue::BindOk as QueueBindOk;
 use amq_protocol::protocol::queue::Declare as QueueDeclare;
 use amq_protocol::protocol::queue::DeclareOk as QueueDeclareOk;
 use amq_protocol::types::FieldTable;
@@ -143,6 +145,34 @@ impl Channel {
         }
 
         Ok(Queue::new(self, name))
+    }
+
+    pub fn queue_bind<S0: Into<String>, S1: Into<String>, S2: Into<String>>(
+        &self,
+        queue: S0,
+        exchange: S1,
+        routing_key: S2,
+        nowait: bool,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        let bind = AmqpQueue::Bind(QueueBind {
+            ticket: 0,
+            queue: queue.into(),
+            exchange: exchange.into(),
+            routing_key: routing_key.into(),
+            nowait,
+            arguments,
+        });
+
+        debug!("binding queue to exchange: {:?}", bind);
+        if nowait {
+            handle.call_nowait(bind)
+        } else {
+            handle.call::<_, QueueBindOk>(bind).map(|_| ())
+        }
     }
 
     pub fn exchange_declare<S: Into<String>>(

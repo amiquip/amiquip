@@ -1,4 +1,4 @@
-use crate::{Channel, Consumer, FieldTable, Result};
+use crate::{Channel, Consumer, Exchange, FieldTable, Result};
 
 pub struct Queue<'a> {
     channel: &'a Channel,
@@ -19,6 +19,10 @@ impl Queue<'_> {
         Queue { channel, name }
     }
 
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn consume(
         &self,
         no_local: bool,
@@ -28,5 +32,16 @@ impl Queue<'_> {
     ) -> Result<Consumer> {
         self.channel
             .basic_consume(self.name.clone(), no_local, no_ack, exclusive, arguments)
+    }
+
+    pub fn bind<S: Into<String>>(
+        &self,
+        exchange: &Exchange,
+        routing_key: S,
+        nowait: bool,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        self.channel
+            .queue_bind(self.name(), exchange.name(), routing_key, nowait, arguments)
     }
 }
