@@ -1,14 +1,14 @@
 use crate::{Channel, Delivery, ErrorKind, Result};
 use crossbeam_channel::Receiver;
 
-pub struct Consumer {
-    channel: Channel,
+pub struct Consumer<'a> {
+    channel: &'a Channel,
     consumer_tag: String,
     rx: Receiver<ConsumerMessage>,
     cancelled: bool,
 }
 
-impl Drop for Consumer {
+impl Drop for Consumer<'_> {
     fn drop(&mut self) {
         let _ = self.cancel();
     }
@@ -24,9 +24,9 @@ pub enum ConsumerMessage {
     ServerClosedConnection(ErrorKind),
 }
 
-impl Consumer {
+impl Consumer<'_> {
     pub(crate) fn new(
-        channel: Channel,
+        channel: &Channel,
         consumer_tag: String,
         rx: Receiver<ConsumerMessage>,
     ) -> Consumer {

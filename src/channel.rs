@@ -6,26 +6,25 @@ use amq_protocol::protocol::basic::{
 };
 use amq_protocol::types::FieldTable;
 use log::{debug, trace};
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
 
-#[derive(Clone)]
 pub struct Channel {
-    inner: Arc<Mutex<Inner>>,
+    inner: RefCell<Inner>,
 }
 
 impl Channel {
     pub(crate) fn new(handle: ChannelHandle) -> Channel {
-        let inner = Arc::new(Mutex::new(Inner::new(handle)));
+        let inner = RefCell::new(Inner::new(handle));
         Channel { inner }
     }
 
     pub fn close(self) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.borrow_mut();
         inner.close()
     }
 
     pub fn basic_qos(&self, prefetch_size: u32, prefetch_count: u16, global: bool) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.borrow_mut();
         let handle = inner.get_handle_mut()?;
 
         handle
@@ -46,7 +45,7 @@ impl Channel {
         immediate: bool,
         properties: &AMQPProperties,
     ) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.borrow_mut();
         let handle = inner.get_handle_mut()?;
 
         handle.call_nowait(AmqpBasic::Publish(Publish {
@@ -66,7 +65,7 @@ impl Channel {
         no_ack: bool,
         exclusive: bool,
     ) -> Result<Consumer> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.borrow_mut();
         let handle = inner.get_handle_mut()?;
 
         let (tag, rx) = handle.consume(Consume {
@@ -79,11 +78,11 @@ impl Channel {
             nowait: false,                // TODO should we support this?
             arguments: FieldTable::new(), // TODO anything to put here?
         })?;
-        Ok(Consumer::new(self.clone(), tag, rx))
+        Ok(Consumer::new(self, tag, rx))
     }
 
     pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.borrow_mut();
         let handle = inner.get_handle_mut()?;
 
         handle.call_nowait(AmqpBasic::Ack(Ack {
@@ -93,7 +92,7 @@ impl Channel {
     }
 
     pub fn basic_cancel(&self, consumer: &Consumer) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.borrow_mut();
         let handle = inner.get_handle_mut()?;
 
         debug!("cancelling consumer {}", consumer.consumer_tag());
