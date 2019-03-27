@@ -62,7 +62,17 @@ struct ChannelSlot {
 impl ChannelSlot {
     fn new(mio_channel_bound: usize, channel_id: u16) -> (ChannelSlot, IoLoopHandle) {
         let (mio_tx, mio_rx) = mio_sync_channel(mio_channel_bound);
-        let (tx, rx) = crossbeam_channel::unbounded();
+
+        // Bound of 2 is intentional here. The normal case for this channel is that it
+        // will have at most 1 message in it (the response to a synchronous RPC call).
+        // However, we might asynchronously receive a channel-close message from the
+        // server, and there should be room to push that into this channel as well. If
+        // we try to send to this channel and get blocked, we will exit the I/O loop
+        // quickly as something has gone wrong internally; either a channel client has
+        // tried to send 2 RPC synchronous calls without waiting for the answer to the
+        // first, or the server has sent us multiple messages unrelated to RPC requests.
+        // Either way, the connection is in a bad state - bail out.
+        let (tx, rx) = crossbeam_channel::bounded(2);
 
         let channel_slot = ChannelSlot {
             rx: mio_rx,

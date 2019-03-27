@@ -8,7 +8,7 @@ use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
 use amq_protocol::protocol::{AMQPClass, AMQPHardError};
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Sender, TrySendError};
 use failure::ResultExt;
 use log::{debug, error, trace, warn};
 use std::collections::hash_map::Entry;
@@ -47,10 +47,20 @@ fn slot_get_mut(inner: &mut Inner, channel_id: u16) -> Result<&mut ChannelSlot> 
 }
 
 fn send<T: Send + Sync + 'static>(tx: &Sender<T>, item: T) -> Result<()> {
-    // TODO Is it okay to error out here (and eventually bubble up and kill the i/o thread)
-    // if a client is gone? If they all drop properly this shouldn't happen, but it seems
-    // dicey...
-    Ok(tx.send(item).context(ErrorKind::EventLoopClientDropped)?)
+    // See comment in ChannelSlot::new() about the bound size of the control
+    // channel. If we're sending to a consumer channel, they are not bounded
+    // and will not return Full.
+    match tx.try_send(item) {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(_)) => {
+            error!("internal error - bounded channel is unexpectedly full");
+            Err(ErrorKind::FrameUnexpected)?
+        }
+        Err(TrySendError::Disconnected(_)) => {
+            error!("internal error - channel client dropped without being disconnected");
+            Err(ErrorKind::EventLoopClientDropped)?
+        }
+    }
 }
 
 impl ConnectionState {
