@@ -49,6 +49,9 @@ pub enum ErrorKind {
     #[fail(display = "I/O error")]
     Io,
 
+    #[fail(display = "TLS handshake failed")]
+    TlsHandshake,
+
     #[fail(display = "requested auth mechanism unavailable (available = {})", _0)]
     UnsupportedAuthMechanism(String),
 

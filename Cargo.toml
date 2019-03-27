@@ -5,6 +5,9 @@ authors = ["John Gallagher <jgallagher@bignerdranch.com>"]
 edition = "2018"
 build = "build.rs"
 
+[features]
+#native-tls = ["native-tls"]
+
 [dependencies]
 failure = "0.1"
 input_buffer = "0.2"
@@ -16,6 +19,7 @@ mio-extras = "2.0"
 cookie-factory = "0.2"
 crossbeam-channel = "0.3"
 indexmap = "1.0"
+native-tls = { version = "*", optional = true }
 
 # only for test binary - remove later
 env_logger = "0.6"
