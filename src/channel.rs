@@ -64,10 +64,16 @@ impl Channel {
         no_local: bool,
         no_ack: bool,
         exclusive: bool,
+        arguments: FieldTable,
     ) -> Result<Consumer> {
         let mut inner = self.inner.borrow_mut();
         let handle = inner.get_handle_mut()?;
 
+        // NOTE: We currently don't support nowait consumers for two reasons:
+        // 1. We always let the server pick the consumption tag, so without
+        //    the consume-ok we don't have a tag to cancel.
+        // 2. The I/O loop allocates the channel to send deliveries when it
+        //    receives consume-ok.
         let (tag, rx) = handle.consume(Consume {
             ticket: 0,
             queue: queue.into(),
@@ -75,8 +81,8 @@ impl Channel {
             no_local,
             no_ack,
             exclusive,
-            nowait: false,                // TODO should we support this?
-            arguments: FieldTable::new(), // TODO anything to put here?
+            nowait: false,
+            arguments,
         })?;
         Ok(Consumer::new(self, tag, rx))
     }

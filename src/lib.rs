@@ -30,6 +30,8 @@ pub use stream::IoStream;
 pub use stream::TlsConnector;
 
 pub use amq_protocol::protocol::basic::AMQPProperties as AmqpProperties;
+pub use amq_protocol::types::AMQPValue as AmqpValue;
+pub use amq_protocol::types::FieldTable;
 
 #[allow(dead_code)]
 mod built_info {
