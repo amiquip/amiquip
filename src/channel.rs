@@ -1,7 +1,7 @@
 use crate::io_loop::ChannelHandle;
 use crate::{
-    Consumer, Delivery, ErrorKind, Exchange, ExchangeDeclareOptions, Queue, QueueDeclareOptions,
-    Result,
+    Consumer, Delivery, ErrorKind, Exchange, ExchangeDeclareOptions, ExchangeType, Queue,
+    QueueDeclareOptions, QueueDeleteOptions, Result,
 };
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::{
@@ -15,6 +15,8 @@ use amq_protocol::protocol::queue::Bind as QueueBind;
 use amq_protocol::protocol::queue::BindOk as QueueBindOk;
 use amq_protocol::protocol::queue::Declare as QueueDeclare;
 use amq_protocol::protocol::queue::DeclareOk as QueueDeclareOk;
+use amq_protocol::protocol::queue::Delete as QueueDelete;
+use amq_protocol::protocol::queue::DeleteOk as QueueDeleteOk;
 use amq_protocol::protocol::queue::Purge as QueuePurge;
 use amq_protocol::protocol::queue::PurgeOk as QueuePurgeOk;
 use amq_protocol::protocol::queue::Unbind as QueueUnbind;
@@ -218,7 +220,35 @@ impl Channel {
         if nowait {
             handle.call_nowait(purge).map(|()| None)
         } else {
-            handle.call::<_, QueuePurgeOk>(purge).map(|ok| Some(ok.message_count))
+            handle
+                .call::<_, QueuePurgeOk>(purge)
+                .map(|ok| Some(ok.message_count))
+        }
+    }
+
+    pub fn queue_delete<S: Into<String>>(
+        &self,
+        queue: S,
+        options: QueueDeleteOptions,
+    ) -> Result<Option<u32>> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        let delete = AmqpQueue::Delete(QueueDelete {
+            ticket: 0,
+            queue: queue.into(),
+            if_unused: options.if_unused,
+            if_empty: options.if_empty,
+            nowait: options.nowait,
+        });
+
+        debug!("deleting queue: {:?}", delete);
+        if options.nowait {
+            handle.call_nowait(delete).map(|()| None)
+        } else {
+            handle
+                .call::<_, QueueDeleteOk>(delete)
+                .map(|ok| Some(ok.message_count))
         }
     }
 

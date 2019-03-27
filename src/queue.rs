@@ -13,6 +13,12 @@ pub struct QueueDeclareOptions {
     pub arguments: FieldTable,
 }
 
+pub struct QueueDeleteOptions {
+    pub if_unused: bool,
+    pub if_empty: bool,
+    pub nowait: bool,
+}
+
 impl Queue<'_> {
     pub(crate) fn new(channel: &Channel, name: String) -> Queue {
         Queue { channel, name }
@@ -56,5 +62,9 @@ impl Queue<'_> {
 
     pub fn purge(&self, nowait: bool) -> Result<Option<u32>> {
         self.channel.queue_purge(self.name(), nowait)
+    }
+
+    pub fn delete(&self, options: QueueDeleteOptions) -> Result<Option<u32>> {
+        self.channel.queue_delete(self.name(), options)
     }
 }

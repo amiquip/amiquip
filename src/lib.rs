@@ -27,7 +27,7 @@ pub use errors::{ErrorKind, Result};
 pub use io_loop::ConnectionBlockedNotification;
 pub use notification_listeners::NotificationListener;
 pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeType};
-pub use queue::{Queue, QueueDeclareOptions};
+pub use queue::{Queue, QueueDeclareOptions, QueueDeleteOptions};
 pub use stream::IoStream;
 
 #[cfg(feature = "native-tls")]
