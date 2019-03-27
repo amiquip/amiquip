@@ -7,6 +7,7 @@ mod connection_options;
 mod consumer;
 mod delivery;
 mod errors;
+mod exchange;
 mod frame_buffer;
 mod heartbeats;
 mod io_loop;
@@ -25,6 +26,7 @@ pub use errors::ArcError as Error;
 pub use errors::{ErrorKind, Result};
 pub use io_loop::ConnectionBlockedNotification;
 pub use notification_listeners::NotificationListener;
+pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeType};
 pub use queue::{Queue, QueueDeclareOptions};
 pub use stream::IoStream;
 

@@ -1,9 +1,15 @@
 use crate::io_loop::ChannelHandle;
-use crate::{Consumer, Delivery, ErrorKind, Queue, QueueDeclareOptions, Result};
+use crate::{
+    Consumer, Delivery, ErrorKind, Exchange, ExchangeDeclareOptions, Queue, QueueDeclareOptions,
+    Result,
+};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::{
     AMQPProperties, Ack, Cancel, CancelOk, Consume, Publish, Qos, QosOk,
 };
+use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
+use amq_protocol::protocol::exchange::Declare as ExchangeDeclare;
+use amq_protocol::protocol::exchange::DeclareOk as ExchangeDeclareOk;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::queue::Declare as QueueDeclare;
 use amq_protocol::protocol::queue::DeclareOk as QueueDeclareOk;
@@ -137,6 +143,56 @@ impl Channel {
         }
 
         Ok(Queue::new(self, name))
+    }
+
+    pub fn exchange_declare<S: Into<String>>(
+        &self,
+        exchange: S,
+        options: ExchangeDeclareOptions,
+    ) -> Result<Exchange> {
+        self.exchange_declare_common(exchange, false, options)
+    }
+
+    pub fn exchange_declare_passive<S: Into<String>>(&self, exchange: S) -> Result<Exchange> {
+        // per spec, if passive is set all other fields are ignored except nowait (which
+        // must be false to be meaningful)
+        let options = ExchangeDeclareOptions {
+            nowait: false,
+            ..ExchangeDeclareOptions::default()
+        };
+        self.exchange_declare_common(exchange, true, options)
+    }
+
+    fn exchange_declare_common<S: Into<String>>(
+        &self,
+        exchange: S,
+        passive: bool,
+        options: ExchangeDeclareOptions,
+    ) -> Result<Exchange> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+        let name = exchange.into();
+
+        let declare = AmqpExchange::Declare(ExchangeDeclare {
+            ticket: 0,
+            exchange: name.clone(),
+            passive,
+            type_: options.type_.as_ref().to_string(),
+            durable: options.durable,
+            auto_delete: options.auto_delete,
+            internal: options.internal,
+            nowait: options.nowait,
+            arguments: options.arguments,
+        });
+
+        debug!("declaring exchange: {:?}", declare);
+        if options.nowait {
+            handle.call_nowait(declare)?;
+        } else {
+            let _ = handle.call::<_, ExchangeDeclareOk>(declare)?;
+        }
+
+        Ok(Exchange::new(self, name))
     }
 
     pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {

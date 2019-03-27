@@ -8,6 +8,7 @@ use amq_protocol::protocol::basic::AMQPProperties;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
+use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::AMQPClass;
 use cookie_factory::GenError;
 use std::ops::{Index, RangeFrom};
@@ -94,6 +95,12 @@ impl_try_from_class!(
     AmqpQueue::DeclareOk
 );
 
+impl_try_from_class!(
+    amq_protocol::protocol::exchange::DeclareOk,
+    AMQPClass::Exchange,
+    AmqpExchange::DeclareOk
+);
+
 pub(crate) trait TryFromAmqpFrame: Sized {
     fn try_from(channel_id: u16, frame: AMQPFrame) -> Result<Self>;
 }
@@ -138,6 +145,12 @@ impl IntoAmqpClass for AmqpChannel {
 impl IntoAmqpClass for AmqpQueue {
     fn into_class(self) -> AMQPClass {
         AMQPClass::Queue(self)
+    }
+}
+
+impl IntoAmqpClass for AmqpExchange {
+    fn into_class(self) -> AMQPClass {
+        AMQPClass::Exchange(self)
     }
 }
 
