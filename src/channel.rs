@@ -13,6 +13,8 @@ use amq_protocol::protocol::exchange::DeclareOk as ExchangeDeclareOk;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::queue::Bind as QueueBind;
 use amq_protocol::protocol::queue::BindOk as QueueBindOk;
+use amq_protocol::protocol::queue::Unbind as QueueUnbind;
+use amq_protocol::protocol::queue::UnbindOk as QueueUnbindOk;
 use amq_protocol::protocol::queue::Declare as QueueDeclare;
 use amq_protocol::protocol::queue::DeclareOk as QueueDeclareOk;
 use amq_protocol::types::FieldTable;
@@ -173,6 +175,28 @@ impl Channel {
         } else {
             handle.call::<_, QueueBindOk>(bind).map(|_| ())
         }
+    }
+
+    pub fn queue_unbind<S0: Into<String>, S1: Into<String>, S2: Into<String>>(
+        &self,
+        queue: S0,
+        exchange: S1,
+        routing_key: S2,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        let unbind = AmqpQueue::Unbind(QueueUnbind {
+            ticket: 0,
+            queue: queue.into(),
+            exchange: exchange.into(),
+            routing_key: routing_key.into(),
+            arguments,
+        });
+
+        debug!("unbinding queue from exchange: {:?}", unbind);
+        handle.call::<_, QueueUnbindOk>(unbind).map(|_| ())
     }
 
     pub fn exchange_declare<S: Into<String>>(

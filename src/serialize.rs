@@ -99,6 +99,11 @@ impl_try_from_class!(
     AMQPClass::Queue,
     AmqpQueue::BindOk
 );
+impl_try_from_class!(
+    amq_protocol::protocol::queue::UnbindOk,
+    AMQPClass::Queue,
+    AmqpQueue::UnbindOk
+);
 
 impl_try_from_class!(
     amq_protocol::protocol::exchange::DeclareOk,

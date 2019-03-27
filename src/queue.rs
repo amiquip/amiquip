@@ -44,4 +44,14 @@ impl Queue<'_> {
         self.channel
             .queue_bind(self.name(), exchange.name(), routing_key, nowait, arguments)
     }
+
+    pub fn unbind<S: Into<String>>(
+        &self,
+        exchange: &Exchange,
+        routing_key: S,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        self.channel
+            .queue_unbind(self.name(), exchange.name(), routing_key, arguments)
+    }
 }
