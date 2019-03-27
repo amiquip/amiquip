@@ -1,9 +1,12 @@
 use crate::io_loop::ChannelHandle;
-use crate::{Consumer, Delivery, ErrorKind, Result};
+use crate::{Consumer, Delivery, ErrorKind, Queue, QueueDeclareOptions, Result};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::{
     AMQPProperties, Ack, Cancel, CancelOk, Consume, Publish, Qos, QosOk,
 };
+use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
+use amq_protocol::protocol::queue::Declare as QueueDeclare;
+use amq_protocol::protocol::queue::DeclareOk as QueueDeclareOk;
 use amq_protocol::types::FieldTable;
 use log::{debug, trace};
 use std::cell::RefCell;
@@ -85,6 +88,55 @@ impl Channel {
             arguments,
         })?;
         Ok(Consumer::new(self, tag, rx))
+    }
+
+    pub fn queue_declare<S: Into<String>>(
+        &self,
+        queue: S,
+        options: QueueDeclareOptions,
+    ) -> Result<Queue> {
+        self.queue_declare_common(queue, false, options)
+    }
+
+    pub fn queue_declare_passive<S: Into<String>>(&self, queue: S) -> Result<Queue> {
+        // per spec, if passive is set all other fields are ignored except nowait (which
+        // must be false to be meaningful)
+        let options = QueueDeclareOptions {
+            nowait: false,
+            ..QueueDeclareOptions::default()
+        };
+        self.queue_declare_common(queue, true, options)
+    }
+
+    fn queue_declare_common<S: Into<String>>(
+        &self,
+        queue: S,
+        passive: bool,
+        options: QueueDeclareOptions,
+    ) -> Result<Queue> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+        let name = queue.into();
+
+        let declare = AmqpQueue::Declare(QueueDeclare {
+            ticket: 0,
+            queue: name.clone(),
+            passive,
+            durable: options.durable,
+            exclusive: options.exclusive,
+            auto_delete: options.auto_delete,
+            nowait: options.nowait,
+            arguments: options.arguments,
+        });
+
+        debug!("declaring queue: {:?}", declare);
+        if options.nowait {
+            handle.call_nowait(declare)?;
+        } else {
+            let _ = handle.call::<_, QueueDeclareOk>(declare)?;
+        }
+
+        Ok(Queue::new(self, name))
     }
 
     pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {

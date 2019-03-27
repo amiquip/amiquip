@@ -11,6 +11,7 @@ mod frame_buffer;
 mod heartbeats;
 mod io_loop;
 mod notification_listeners;
+mod queue;
 mod serialize;
 mod stream;
 
@@ -24,6 +25,7 @@ pub use errors::ArcError as Error;
 pub use errors::{ErrorKind, Result};
 pub use io_loop::ConnectionBlockedNotification;
 pub use notification_listeners::NotificationListener;
+pub use queue::{Queue, QueueDeclareOptions};
 pub use stream::IoStream;
 
 #[cfg(feature = "native-tls")]
