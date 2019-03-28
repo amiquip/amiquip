@@ -66,4 +66,26 @@ impl Exchange<'_> {
             properties,
         )
     }
+
+    pub fn bind_to_source<S: Into<String>>(
+        &self,
+        other: &Exchange,
+        routing_key: S,
+        nowait: bool,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        self.channel
+            .exchange_bind(self.name(), other.name(), routing_key, nowait, arguments)
+    }
+
+    pub fn bind_to_destination<S: Into<String>>(
+        &self,
+        other: &Exchange,
+        routing_key: S,
+        nowait: bool,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        self.channel
+            .exchange_bind(other.name(), self.name(), routing_key, nowait, arguments)
+    }
 }

@@ -10,6 +10,8 @@ use amq_protocol::protocol::basic::{
     Reject,
 };
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
+use amq_protocol::protocol::exchange::Bind as ExchangeBind;
+use amq_protocol::protocol::exchange::BindOk as ExchangeBindOk;
 use amq_protocol::protocol::exchange::Declare as ExchangeDeclare;
 use amq_protocol::protocol::exchange::DeclareOk as ExchangeDeclareOk;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
@@ -336,6 +338,34 @@ impl Channel {
         }
 
         Ok(Exchange::new(self, name))
+    }
+
+    pub fn exchange_bind<S0: Into<String>, S1: Into<String>, S2: Into<String>>(
+        &self,
+        destination: S0,
+        source: S1,
+        routing_key: S2,
+        nowait: bool,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        let bind = AmqpExchange::Bind(ExchangeBind {
+            ticket: 0,
+            destination: destination.into(),
+            source: source.into(),
+            routing_key: routing_key.into(),
+            nowait,
+            arguments,
+        });
+
+        debug!("binding exchange: {:?}", bind);
+        if nowait {
+            handle.call_nowait(bind)
+        } else {
+            handle.call::<_, ExchangeBindOk>(bind).map(|_bind_ok| ())
+        }
     }
 
     pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
