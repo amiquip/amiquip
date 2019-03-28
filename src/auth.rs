@@ -6,6 +6,7 @@ pub trait Sasl: Default + Clone + Send + 'static {
 #[derive(Debug, Clone)]
 pub enum Auth {
     Plain { username: String, password: String },
+    External,
 }
 
 impl Default for Auth {
@@ -21,12 +22,14 @@ impl Sasl for Auth {
     fn mechanism(&self) -> String {
         match *self {
             Auth::Plain { .. } => "PLAIN".to_string(),
+            Auth::External => "EXTERNAL".to_string(),
         }
     }
 
     fn response(&self) -> String {
         match self {
             Auth::Plain { username, password } => format!("\x00{}\x00{}", username, password),
+            Auth::External => "".to_string(),
         }
     }
 }
