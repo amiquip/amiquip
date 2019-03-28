@@ -6,7 +6,7 @@ use crate::{
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Get as AmqpGet;
 use amq_protocol::protocol::basic::{
-    AMQPProperties, Ack, Cancel, CancelOk, Consume, Publish, Qos, QosOk,
+    AMQPProperties, Ack, Cancel, CancelOk, Consume, Nack, Publish, Qos, QosOk, Reject,
 };
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::exchange::Declare as ExchangeDeclare;
@@ -335,6 +335,27 @@ impl Channel {
         handle.call_nowait(AmqpBasic::Ack(Ack {
             delivery_tag: delivery.delivery_tag(),
             multiple,
+        }))
+    }
+
+    pub fn basic_nack(&self, delivery: &Delivery, multiple: bool, requeue: bool) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        handle.call_nowait(AmqpBasic::Nack(Nack {
+            delivery_tag: delivery.delivery_tag(),
+            multiple,
+            requeue,
+        }))
+    }
+
+    pub fn basic_reject(&self, delivery: &Delivery, requeue: bool) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        handle.call_nowait(AmqpBasic::Reject(Reject {
+            delivery_tag: delivery.delivery_tag(),
+            requeue,
         }))
     }
 
