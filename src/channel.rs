@@ -42,7 +42,7 @@ impl Channel {
         inner.close()
     }
 
-    pub fn basic_qos(&self, prefetch_size: u32, prefetch_count: u16, global: bool) -> Result<()> {
+    pub fn qos(&self, prefetch_size: u32, prefetch_count: u16, global: bool) -> Result<()> {
         let mut inner = self.inner.borrow_mut();
         let handle = inner.get_handle_mut()?;
 
