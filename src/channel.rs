@@ -14,6 +14,8 @@ use amq_protocol::protocol::exchange::Bind as ExchangeBind;
 use amq_protocol::protocol::exchange::BindOk as ExchangeBindOk;
 use amq_protocol::protocol::exchange::Declare as ExchangeDeclare;
 use amq_protocol::protocol::exchange::DeclareOk as ExchangeDeclareOk;
+use amq_protocol::protocol::exchange::Unbind as ExchangeUnbind;
+use amq_protocol::protocol::exchange::UnbindOk as ExchangeUnbindOk;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::queue::Bind as QueueBind;
 use amq_protocol::protocol::queue::BindOk as QueueBindOk;
@@ -365,6 +367,36 @@ impl Channel {
             handle.call_nowait(bind)
         } else {
             handle.call::<_, ExchangeBindOk>(bind).map(|_bind_ok| ())
+        }
+    }
+
+    pub fn exchange_unbind<S0: Into<String>, S1: Into<String>, S2: Into<String>>(
+        &self,
+        destination: S0,
+        source: S1,
+        routing_key: S2,
+        nowait: bool,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        let unbind = AmqpExchange::Unbind(ExchangeUnbind {
+            ticket: 0,
+            destination: destination.into(),
+            source: source.into(),
+            routing_key: routing_key.into(),
+            nowait,
+            arguments,
+        });
+
+        debug!("unbinding exchange: {:?}", unbind);
+        if nowait {
+            handle.call_nowait(unbind)
+        } else {
+            handle
+                .call::<_, ExchangeUnbindOk>(unbind)
+                .map(|_unbind_ok| ())
         }
     }
 
