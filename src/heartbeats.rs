@@ -33,18 +33,6 @@ impl<T: Copy + Debug> Heartbeat<T> {
         }
     }
 
-    pub fn set_interval(&mut self, interval: Duration, timer: &mut Timer<T>) -> HeartbeatState {
-        assert!(
-            interval > Duration::from_millis(0),
-            "timer interval cannot be 0"
-        );
-        if interval == self.interval {
-            return HeartbeatState::StillRunning;
-        }
-        self.interval = interval;
-        self.fire(timer)
-    }
-
     pub fn record_activity(&mut self) {
         self.last = Instant::now();
     }
@@ -164,51 +152,6 @@ mod tests {
         // timer should fire again and expire in just ~200ms
         let state = t.poll_until_fire(&mut h);
         assert_duration_is_about(start.elapsed(), millis(600));
-        assert_eq!(state, HeartbeatState::Expired);
-    }
-
-    #[test]
-    fn set_interval_shorter() {
-        let mut t = Harness::new();
-        let mut h = Heartbeat::start(0, millis(400), &mut t.timer);
-        let start = Instant::now();
-
-        // wait for 300ms; timer shouldn't have fired, but changing interval to 200ms
-        // should cause it to return expired
-        t.poll(millis(300));
-        assert!(t.events.is_empty());
-        assert_duration_is_about(start.elapsed(), millis(300));
-        assert_eq!(
-            h.set_interval(millis(200), &mut t.timer),
-            HeartbeatState::Expired
-        );
-
-        // now that it's 200ms, it should fire again at the 500ms mark (200ms after
-        // it last expired)
-        let state = t.poll_until_fire(&mut h);
-        assert_duration_is_about(start.elapsed(), millis(500));
-        assert_eq!(state, HeartbeatState::Expired);
-    }
-
-    #[test]
-    fn set_interval_longer() {
-        let mut t = Harness::new();
-        let mut h = Heartbeat::start(0, millis(200), &mut t.timer);
-        let start = Instant::now();
-
-        // wait for 100ms; timer shouldn't have fired, but changing interval to 400ms
-        // should cause it to return StillRunning and not fire til the 400ms mark
-        t.poll(millis(100));
-        assert_duration_is_about(start.elapsed(), millis(100));
-        assert!(t.events.is_empty());
-        assert_eq!(
-            h.set_interval(millis(400), &mut t.timer),
-            HeartbeatState::StillRunning
-        );
-
-        // now that it's 400ms, it should expire 400ms from when we started
-        let state = t.poll_until_fire(&mut h);
-        assert_duration_is_about(start.elapsed(), millis(400));
         assert_eq!(state, HeartbeatState::Expired);
     }
 }

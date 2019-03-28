@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod auth;
 mod channel;
 mod connection;
