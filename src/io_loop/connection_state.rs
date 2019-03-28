@@ -7,6 +7,8 @@ use amq_protocol::protocol::channel::CloseOk as ChannelCloseOk;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
+use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
+use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::{AMQPClass, AMQPHardError};
 use crossbeam_channel::{Sender, TrySendError};
 use failure::ResultExt;
@@ -263,8 +265,19 @@ impl ConnectionState {
                 let slot = slot_get(inner, n)?;
                 send(&slot.tx, Ok(ChannelMessage::GetOk(None)))?;
             }
-            // TODO break this out into other methods so we know which ones we expect
-            AMQPFrame::Method(n, method) => {
+            // Generic ack messages we send back to the caller.
+            AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::QosOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::RecoverOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Channel(AmqpChannel::OpenOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::DeclareOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::DeleteOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::BindOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::UnbindOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::DeclareOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::DeleteOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::BindOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::PurgeOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::UnbindOk(_))) => {
                 let slot = slot_get(inner, n)?;
                 trace!(
                     "trying to send method to client for channel {}: {:?}",
@@ -272,6 +285,42 @@ impl ConnectionState {
                     method
                 );
                 send(&slot.tx, Ok(ChannelMessage::Method(method)))?;
+            }
+            // Methods we do not handle
+            AMQPFrame::Method(n, method @ AMQPClass::Access(_))
+            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Ack(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Nack(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Channel(AmqpChannel::Flow(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Channel(AmqpChannel::FlowOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Confirm(_))
+            | AMQPFrame::Method(n, method @ AMQPClass::Tx(_)) => {
+                let text = format!(
+                    "do not know how to handle channel {} method {:?}",
+                    n, method
+                );
+                self.client_exception(inner, AMQPHardError::NOTIMPLEMENTED, text)?;
+            }
+            // Methods that are illegal coming from the server
+            AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Qos(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Consume(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Get(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Publish(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Recover(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::RecoverAsync(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Reject(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Channel(AmqpChannel::Open(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Connection(_))
+            | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::Declare(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::Delete(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::Bind(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::Unbind(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::Declare(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::Delete(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::Bind(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::Purge(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Queue(AmqpQueue::Unbind(_))) => {
+                let text = format!("illegal channel {} method {:?}", n, method);
+                self.client_exception(inner, AMQPHardError::NOTALLOWED, text)?;
             }
             // Server sending content header as part of a deliver.
             AMQPFrame::Header(n, _, header) => {
