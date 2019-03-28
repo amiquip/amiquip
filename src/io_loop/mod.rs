@@ -4,7 +4,7 @@ use crate::frame_buffer::FrameBuffer;
 use crate::notification_listeners::NotificationListeners;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
 use crate::stream::{HandshakeStream, IoStream};
-use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, Result};
+use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, Result, Return};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
 use amq_protocol::protocol::AMQPClass;
@@ -45,6 +45,7 @@ const ALLOC_CHANNEL: Token = Token(u16::max_value() as usize + 3);
 enum IoLoopMessage {
     Send(OutputBuffer),
     ConnectionClose(OutputBuffer),
+    SetReturnHandler(Option<CrossbeamSender<Return>>),
 }
 
 enum ChannelMessage {
@@ -57,6 +58,7 @@ struct ChannelSlot {
     tx: CrossbeamSender<Result<ChannelMessage>>,
     collector: ContentCollector,
     consumers: HashMap<String, CrossbeamSender<ConsumerMessage>>,
+    return_handler: Option<CrossbeamSender<Return>>,
 }
 
 impl ChannelSlot {
@@ -79,6 +81,7 @@ impl ChannelSlot {
             tx,
             collector: ContentCollector::new(),
             consumers: HashMap::new(),
+            return_handler: None,
         };
 
         let loop_handle = IoLoopHandle::new(channel_id, mio_tx, rx);
@@ -243,12 +246,17 @@ impl IoLoop {
 
     fn run_tls_handshake<S: HandshakeStream>(&mut self, mut stream: S) -> Result<S::Stream> {
         let mut state = None;
-        self.run_io_loop(&mut stream, &mut state, |_, stream, state, _| {
-            if state.is_none() {
-                *state = stream.progress_handshake()?;
-            }
-            Ok(())
-        }, |_, state| state.is_some())?;
+        self.run_io_loop(
+            &mut stream,
+            &mut state,
+            |_, stream, state, _| {
+                if state.is_none() {
+                    *state = stream.progress_handshake()?;
+                }
+                Ok(())
+            },
+            |_, state| state.is_some(),
+        )?;
         Ok(state.unwrap())
     }
 
@@ -643,7 +651,7 @@ impl Inner {
     fn handle_channel0_readable(&mut self, ch0_slot: &Channel0Slot) -> Result<()> {
         loop {
             match ch0_slot.common.rx.try_recv() {
-                Ok(message) => self.process_channel_message(message)?,
+                Ok(message) => self.process_channel_message(0, message)?,
                 Err(TryRecvError::Empty) => return Ok(()),
                 Err(TryRecvError::Disconnected) => Err(ErrorKind::EventLoopClientDropped)?,
             }
@@ -666,14 +674,14 @@ impl Inner {
                 }
             };
             match slot.rx.try_recv() {
-                Ok(message) => self.process_channel_message(message)?,
+                Ok(message) => self.process_channel_message(channel_id, message)?,
                 Err(TryRecvError::Empty) => return Ok(()),
                 Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
             }
         }
     }
 
-    fn process_channel_message(&mut self, message: IoLoopMessage) -> Result<()> {
+    fn process_channel_message(&mut self, channel_id: u16, message: IoLoopMessage) -> Result<()> {
         match message {
             IoLoopMessage::ConnectionClose(buf) => {
                 self.outbuf.append(buf);
@@ -681,6 +689,13 @@ impl Inner {
             }
             IoLoopMessage::Send(buf) => {
                 self.outbuf.append(buf);
+            }
+            IoLoopMessage::SetReturnHandler(handler) => {
+                assert!(channel_id != 0, "channel 0 cannot have a return handler");
+                // unwrap is safe here, because we can only be called if we just
+                // received a message from this slot.
+                let slot = self.chan_slots.get_mut(channel_id).unwrap();
+                slot.return_handler = handler;
             }
         }
         Ok(())

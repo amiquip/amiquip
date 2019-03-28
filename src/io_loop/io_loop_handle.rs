@@ -1,13 +1,14 @@
 use super::{ChannelMessage, ConnectionBlockedNotification, ConsumerMessage, IoLoopMessage};
 use crate::notification_listeners::{NotificationListener, NotificationListeners};
 use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass};
-use crate::{AmqpProperties, Error, ErrorKind, Result};
+use crate::{AmqpProperties, Error, ErrorKind, Result, Return};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Consume;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
+use crossbeam_channel::Sender as CrossbeamSender;
 use log::error;
 use mio_extras::channel::SyncSender as MioSyncSender;
 use std::ops::{Deref, DerefMut};
@@ -42,6 +43,13 @@ impl IoLoopHandle {
         debug_assert!(self.buf.is_empty());
         self.buf.push_method(self.channel_id, method)?;
         Ok(self.buf.drain_into_new_buf())
+    }
+
+    pub(super) fn set_return_handler(
+        &mut self,
+        handler: Option<CrossbeamSender<Return>>,
+    ) -> Result<()> {
+        self.send(IoLoopMessage::SetReturnHandler(handler))
     }
 
     pub(super) fn consume(

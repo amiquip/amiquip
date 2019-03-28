@@ -1,4 +1,4 @@
-use crate::{ErrorKind, Result};
+use crate::{ErrorKind, Result, Return};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::CancelOk;
@@ -64,6 +64,23 @@ fn send<T: Send + Sync + 'static>(tx: &Sender<T>, item: T) -> Result<()> {
     }
 }
 
+// When we set up a return listener, it's just a crossbeam channel. If it gets dropped,
+// we don't want to error; just start discarding returned messages.
+fn try_send_return(slot: &mut ChannelSlot, return_: Return) {
+    let return_ = if let Some(tx) = &slot.return_handler {
+        match tx.try_send(return_) {
+            Ok(()) => return,
+            Err(TrySendError::Full(return_)) | Err(TrySendError::Disconnected(return_)) => {
+                slot.return_handler = None;
+                return_
+            }
+        }
+    } else {
+        return_
+    };
+    warn!("discarding returned data {:?}", return_);
+}
+
 impl ConnectionState {
     pub(super) fn process(&mut self, inner: &mut Inner, frame: AMQPFrame) -> Result<()> {
         // bail out if we shouldn't be getting frames
@@ -102,7 +119,9 @@ impl ConnectionState {
             }
             // Server ack for client-initiated connection close.
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::CloseOk(close_ok))) => {
-                ch0_slot.common.tx
+                ch0_slot
+                    .common
+                    .tx
                     .send(Ok(ChannelMessage::Method(AMQPClass::Connection(
                         AmqpConnection::CloseOk(close_ok),
                     ))))
@@ -256,7 +275,7 @@ impl ConnectionState {
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {
-                            warn!("discarding returned data {:?}", return_);
+                            try_send_return(slot, return_);
                         }
                     }
                 }
@@ -274,7 +293,7 @@ impl ConnectionState {
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {
-                            warn!("discarding returned data {:?}", return_);
+                            try_send_return(slot, return_);
                         }
                     }
                 }

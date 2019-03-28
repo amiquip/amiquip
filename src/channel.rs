@@ -1,7 +1,7 @@
 use crate::io_loop::ChannelHandle;
 use crate::{
     Consumer, Delivery, ErrorKind, Exchange, ExchangeDeclareOptions, ExchangeType, Queue,
-    QueueDeclareOptions, QueueDeleteOptions, Result,
+    QueueDeclareOptions, QueueDeleteOptions, Result, Return,
 };
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::{
@@ -22,6 +22,7 @@ use amq_protocol::protocol::queue::PurgeOk as QueuePurgeOk;
 use amq_protocol::protocol::queue::Unbind as QueueUnbind;
 use amq_protocol::protocol::queue::UnbindOk as QueueUnbindOk;
 use amq_protocol::types::FieldTable;
+use crossbeam_channel::Receiver;
 use log::{debug, trace};
 use std::cell::RefCell;
 
@@ -110,6 +111,15 @@ impl Channel {
         options: QueueDeclareOptions,
     ) -> Result<Queue> {
         self.queue_declare_common(queue, false, options)
+    }
+
+    pub fn listen_for_returns(&self) -> Result<Receiver<Return>> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        let (tx, rx) = crossbeam_channel::unbounded();
+        handle.set_return_handler(Some(tx))?;
+        Ok(rx)
     }
 
     pub fn queue_declare_passive<S: Into<String>>(&self, queue: S) -> Result<Queue> {
