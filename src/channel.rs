@@ -21,7 +21,6 @@ use amq_protocol::protocol::exchange::UnbindOk as ExchangeUnbindOk;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::queue::Bind as QueueBind;
 use amq_protocol::protocol::queue::BindOk as QueueBindOk;
-use amq_protocol::protocol::queue::Declare as QueueDeclare;
 use amq_protocol::protocol::queue::DeclareOk as QueueDeclareOk;
 use amq_protocol::protocol::queue::Delete as QueueDelete;
 use amq_protocol::protocol::queue::DeleteOk as QueueDeleteOk;
@@ -133,14 +132,6 @@ impl Channel {
         Ok(Consumer::new(self, tag, rx))
     }
 
-    pub fn queue_declare<S: Into<String>>(
-        &self,
-        queue: S,
-        options: QueueDeclareOptions,
-    ) -> Result<Queue> {
-        self.queue_declare_common(queue, false, options)
-    }
-
     pub fn listen_for_returns(&self) -> Result<Receiver<Return>> {
         let mut inner = self.inner.borrow_mut();
         let handle = inner.get_handle_mut()?;
@@ -150,6 +141,39 @@ impl Channel {
         Ok(rx)
     }
 
+    pub fn queue_declare<S: Into<String>>(
+        &self,
+        queue: S,
+        options: QueueDeclareOptions,
+    ) -> Result<Queue> {
+        let declare = AmqpQueue::Declare(options.into_declare(queue.into(), false, false));
+        let ok = self
+            .inner
+            .borrow_mut()
+            .get_handle_mut()?
+            .call::<_, QueueDeclareOk>(declare)?;
+        Ok(Queue::new(
+            self,
+            ok.queue,
+            Some(ok.message_count),
+            Some(ok.consumer_count),
+        ))
+    }
+
+    pub fn queue_declare_nowait<S: Into<String>>(
+        &self,
+        queue: S,
+        options: QueueDeclareOptions,
+    ) -> Result<Queue> {
+        let queue = queue.into();
+        let declare = AmqpQueue::Declare(options.into_declare(queue.clone(), false, true));
+        self.inner
+            .borrow_mut()
+            .get_handle_mut()?
+            .call_nowait(declare)?;
+        Ok(Queue::new(self, queue, None, None))
+    }
+
     pub fn queue_declare_passive<S: Into<String>>(&self, queue: S) -> Result<Queue> {
         // per spec, if passive is set all other fields are ignored except nowait (which
         // must be false to be meaningful)
@@ -157,41 +181,20 @@ impl Channel {
             durable: false,
             exclusive: false,
             auto_delete: false,
-            nowait: false,
             arguments: FieldTable::new(),
         };
-        self.queue_declare_common(queue, true, options)
-    }
-
-    fn queue_declare_common<S: Into<String>>(
-        &self,
-        queue: S,
-        passive: bool,
-        options: QueueDeclareOptions,
-    ) -> Result<Queue> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-        let name = queue.into();
-
-        let declare = AmqpQueue::Declare(QueueDeclare {
-            ticket: 0,
-            queue: name.clone(),
-            passive,
-            durable: options.durable,
-            exclusive: options.exclusive,
-            auto_delete: options.auto_delete,
-            nowait: options.nowait,
-            arguments: options.arguments,
-        });
-
-        debug!("declaring queue: {:?}", declare);
-        if options.nowait {
-            handle.call_nowait(declare)?;
-        } else {
-            let _ = handle.call::<_, QueueDeclareOk>(declare)?;
-        }
-
-        Ok(Queue::new(self, name))
+        let declare = AmqpQueue::Declare(options.into_declare(queue.into(), true, false));
+        let ok = self
+            .inner
+            .borrow_mut()
+            .get_handle_mut()?
+            .call::<_, QueueDeclareOk>(declare)?;
+        Ok(Queue::new(
+            self,
+            ok.queue,
+            Some(ok.message_count),
+            Some(ok.consumer_count),
+        ))
     }
 
     pub fn queue_bind<S0: Into<String>, S1: Into<String>, S2: Into<String>>(

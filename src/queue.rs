@@ -1,16 +1,34 @@
 use crate::{Channel, Consumer, Delivery, Exchange, FieldTable, Get, Result};
+use amq_protocol::protocol::queue::Declare;
 
 pub struct Queue<'a> {
     channel: &'a Channel,
     name: String,
+    message_count: Option<u32>,
+    consumer_count: Option<u32>,
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct QueueDeclareOptions {
     pub durable: bool,
     pub exclusive: bool,
     pub auto_delete: bool,
-    pub nowait: bool,
     pub arguments: FieldTable,
+}
+
+impl QueueDeclareOptions {
+    pub(crate) fn into_declare(self, name: String, passive: bool, nowait: bool) -> Declare {
+        Declare {
+            ticket: 0,
+            queue: name,
+            passive,
+            durable: self.durable,
+            exclusive: self.exclusive,
+            auto_delete: self.auto_delete,
+            nowait,
+            arguments: self.arguments,
+        }
+    }
 }
 
 pub struct QueueDeleteOptions {
@@ -20,13 +38,33 @@ pub struct QueueDeleteOptions {
 }
 
 impl Queue<'_> {
-    pub(crate) fn new(channel: &Channel, name: String) -> Queue {
-        Queue { channel, name }
+    pub(crate) fn new(
+        channel: &Channel,
+        name: String,
+        message_count: Option<u32>,
+        consumer_count: Option<u32>,
+    ) -> Queue {
+        Queue {
+            channel,
+            name,
+            message_count,
+            consumer_count,
+        }
     }
 
     #[inline]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    #[inline]
+    pub fn declared_message_count(&self) -> Option<u32> {
+        self.message_count
+    }
+
+    #[inline]
+    pub fn declared_consumer_count(&self) -> Option<u32> {
+        self.consumer_count
     }
 
     #[inline]
