@@ -13,6 +13,7 @@ use failure::ResultExt;
 use log::{debug, error, trace, warn};
 use std::collections::hash_map::Entry;
 
+use super::content_collector::CollectorResult;
 use super::{
     Channel0Slot, ChannelMessage, ChannelSlot, ConnectionBlockedNotification, ConsumerMessage,
     Inner,
@@ -240,23 +241,31 @@ impl ConnectionState {
             // Server sending content header as part of a deliver.
             AMQPFrame::Header(n, _, header) => {
                 let slot = slot_get_mut(inner, n)?;
-                if let Some((consumer_tag, delivery)) = slot.collector.collect_header(*header)? {
-                    let tx = slot
-                        .consumers
-                        .get(&consumer_tag)
-                        .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
-                    send(tx, ConsumerMessage::Delivery(delivery))?;
+                if let Some(collected) = slot.collector.collect_header(*header)? {
+                    match collected {
+                        CollectorResult::Delivery((consumer_tag, delivery)) => {
+                            let tx = slot
+                                .consumers
+                                .get(&consumer_tag)
+                                .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
+                            send(tx, ConsumerMessage::Delivery(delivery))?;
+                        }
+                    }
                 }
             }
             // Server sending content body as part of a deliver.
             AMQPFrame::Body(n, body) => {
                 let slot = slot_get_mut(inner, n)?;
-                if let Some((consumer_tag, delivery)) = slot.collector.collect_body(body)? {
-                    let tx = slot
-                        .consumers
-                        .get(&consumer_tag)
-                        .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
-                    send(tx, ConsumerMessage::Delivery(delivery))?;
+                if let Some(collected) = slot.collector.collect_body(body)? {
+                    match collected {
+                        CollectorResult::Delivery((consumer_tag, delivery)) => {
+                            let tx = slot
+                                .consumers
+                                .get(&consumer_tag)
+                                .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
+                            send(tx, ConsumerMessage::Delivery(delivery))?;
+                        }
+                    }
                 }
             }
             //_ => panic!("TODO"),

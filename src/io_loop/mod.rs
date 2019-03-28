@@ -25,7 +25,7 @@ use std::time::Duration;
 mod channel_handle;
 mod channel_slots;
 mod connection_state;
-mod delivery_collector;
+mod content_collector;
 mod handshake_state;
 mod heartbeat_timers;
 mod io_loop_handle;
@@ -33,7 +33,7 @@ mod io_loop_handle;
 pub(crate) use channel_handle::{Channel0Handle, ChannelHandle};
 use channel_slots::ChannelSlots;
 use connection_state::ConnectionState;
-use delivery_collector::DeliveryCollector;
+use content_collector::ContentCollector;
 use handshake_state::HandshakeState;
 use heartbeat_timers::{HeartbeatKind, HeartbeatState, HeartbeatTimers};
 use io_loop_handle::{IoLoopHandle, IoLoopHandle0};
@@ -55,7 +55,7 @@ enum ChannelMessage {
 struct ChannelSlot {
     rx: MioReceiver<IoLoopMessage>,
     tx: CrossbeamSender<Result<ChannelMessage>>,
-    collector: DeliveryCollector,
+    collector: ContentCollector,
     consumers: HashMap<String, CrossbeamSender<ConsumerMessage>>,
 }
 
@@ -77,7 +77,7 @@ impl ChannelSlot {
         let channel_slot = ChannelSlot {
             rx: mio_rx,
             tx,
-            collector: DeliveryCollector::new(),
+            collector: ContentCollector::new(),
             consumers: HashMap::new(),
         };
 
