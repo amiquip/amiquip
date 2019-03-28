@@ -1,7 +1,7 @@
 use crate::io_loop::ChannelHandle;
 use crate::{
-    Consumer, Delivery, ErrorKind, Exchange, ExchangeDeclareOptions, ExchangeType, Get, Queue,
-    QueueDeclareOptions, QueueDeleteOptions, Result, Return,
+    Consumer, Delivery, ErrorKind, Exchange, ExchangeDeclareOptions, ExchangeDeleteOptions,
+    ExchangeType, Get, Queue, QueueDeclareOptions, QueueDeleteOptions, Result, Return,
 };
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Get as AmqpGet;
@@ -14,6 +14,8 @@ use amq_protocol::protocol::exchange::Bind as ExchangeBind;
 use amq_protocol::protocol::exchange::BindOk as ExchangeBindOk;
 use amq_protocol::protocol::exchange::Declare as ExchangeDeclare;
 use amq_protocol::protocol::exchange::DeclareOk as ExchangeDeclareOk;
+use amq_protocol::protocol::exchange::Delete as ExchangeDelete;
+use amq_protocol::protocol::exchange::DeleteOk as ExchangeDeleteOk;
 use amq_protocol::protocol::exchange::Unbind as ExchangeUnbind;
 use amq_protocol::protocol::exchange::UnbindOk as ExchangeUnbindOk;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
@@ -397,6 +399,29 @@ impl Channel {
             handle
                 .call::<_, ExchangeUnbindOk>(unbind)
                 .map(|_unbind_ok| ())
+        }
+    }
+
+    pub fn exchange_delete<S: Into<String>>(
+        &self,
+        exchange: S,
+        options: ExchangeDeleteOptions,
+    ) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        let delete = AmqpExchange::Delete(ExchangeDelete {
+            ticket: 0,
+            exchange: exchange.into(),
+            if_unused: options.if_unused,
+            nowait: options.nowait,
+        });
+
+        debug!("deleting exchange: {:?}", delete);
+        if options.nowait {
+            handle.call_nowait(delete)
+        } else {
+            handle.call::<_, ExchangeDeleteOk>(delete).map(|_| ())
         }
     }
 

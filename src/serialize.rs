@@ -131,6 +131,11 @@ impl_try_from_class!(
     AmqpExchange::DeclareOk
 );
 impl_try_from_class!(
+    amq_protocol::protocol::exchange::DeleteOk,
+    AMQPClass::Exchange,
+    AmqpExchange::DeleteOk
+);
+impl_try_from_class!(
     amq_protocol::protocol::exchange::UnbindOk,
     AMQPClass::Exchange,
     AmqpExchange::UnbindOk

@@ -30,6 +30,11 @@ pub struct ExchangeDeclareOptions {
     pub arguments: FieldTable,
 }
 
+pub struct ExchangeDeleteOptions {
+    pub if_unused: bool,
+    pub nowait: bool,
+}
+
 pub struct Exchange<'a> {
     channel: &'a Channel,
     name: String,
@@ -109,5 +114,9 @@ impl Exchange<'_> {
     ) -> Result<()> {
         self.channel
             .exchange_unbind(other.name(), self.name(), routing_key, nowait, arguments)
+    }
+
+    pub fn delete(self, options: ExchangeDeleteOptions) -> Result<()> {
+        self.channel.exchange_delete(self.name(), options)
     }
 }

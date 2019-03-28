@@ -75,7 +75,7 @@ impl Queue<'_> {
     }
 
     #[inline]
-    pub fn delete(&self, options: QueueDeleteOptions) -> Result<Option<u32>> {
+    pub fn delete(self, options: QueueDeleteOptions) -> Result<Option<u32>> {
         self.channel.queue_delete(self.name(), options)
     }
 
