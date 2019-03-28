@@ -113,7 +113,7 @@ impl ConnectionState {
             }
         };
 
-        Ok(match frame {
+        match frame {
             // Server-sent heartbeat
             AMQPFrame::Heartbeat(0) => {
                 // nothing to do here; IoLoop already updated heartbeat timer when it
@@ -223,12 +223,7 @@ impl ConnectionState {
                     send(&tx, ConsumerMessage::Cancelled)?;
                 }
                 if !cancel.nowait {
-                    inner.push_method(
-                        n,
-                        AmqpBasic::CancelOk(CancelOk {
-                            consumer_tag: consumer_tag,
-                        }),
-                    )?;
+                    inner.push_method(n, AmqpBasic::CancelOk(CancelOk { consumer_tag }))?;
                 }
             }
             // Server ack for client-initiated consumer cancel.
@@ -364,6 +359,7 @@ impl ConnectionState {
                     }
                 }
             }
-        })
+        }
+        Ok(())
     }
 }

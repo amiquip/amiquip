@@ -336,7 +336,7 @@ impl IoLoop {
         state: &mut HandshakeState<Auth>,
         event: Event,
     ) -> Result<()> {
-        Ok(match event.token() {
+        match event.token() {
             STREAM => {
                 if event.readiness().is_writable() {
                     self.inner.write_to_stream(stream)?;
@@ -351,7 +351,8 @@ impl IoLoop {
             }
             HEARTBEAT => self.inner.process_heartbeat_timers()?,
             _ => unreachable!(),
-        })
+        }
+        Ok(())
     }
 
     fn is_handshake_done<Auth: Sasl>(&self, state: &HandshakeState<Auth>) -> bool {
@@ -402,7 +403,7 @@ impl IoLoop {
         state: &mut ConnectionState,
         event: Event,
     ) -> Result<()> {
-        Ok(match event.token() {
+        match event.token() {
             STREAM => {
                 if event.readiness().is_writable() {
                     self.inner.write_to_stream(stream)?;
@@ -440,7 +441,8 @@ impl IoLoop {
                 self.inner.handle_channel_readable(n as u16)?
             }
             _ => unreachable!(),
-        })
+        }
+        Ok(())
     }
 
     fn is_connection_done(&self, state: &ConnectionState) -> bool {
@@ -597,7 +599,7 @@ impl Inner {
     fn start_heartbeats(&mut self, interval: u16) {
         if interval > 0 {
             debug!("starting heartbeat timers ({} sec)", interval);
-            self.heartbeats.start(Duration::from_secs(interval as u64));
+            self.heartbeats.start(Duration::from_secs(u64::from(interval)));
         }
     }
 
@@ -792,7 +794,7 @@ impl Inner {
                 }
                 Err(err) => match err.kind() {
                     io::ErrorKind::WouldBlock => {
-                        let _ = self.outbuf.drain_written(pos);
+                        self.outbuf.drain_written(pos);
                         return Ok(());
                     }
                     _ => return Err(err.context(ErrorKind::Io))?,

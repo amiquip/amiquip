@@ -85,7 +85,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
     pub(crate) fn make_start_ok(&self, start: Start) -> Result<(StartOk, FieldTable)> {
         // helper to search space-separated strings (mechanisms and locales)
         fn server_supports(server: &str, client: &str) -> bool {
-            server.split(" ").any(|s| s == client)
+            server.split(' ').any(|s| s == client)
         }
 
         // ensure our requested auth mechanism and locale are available
@@ -152,8 +152,8 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         let frame_max = u32::min(tune.frame_max, self.frame_max);
         let heartbeat = u16::min(tune.heartbeat, self.heartbeat);
 
-        if frame_max < FRAME_MIN_SIZE as u32 {
-            return Err(ErrorKind::FrameMaxTooSmall(FRAME_MIN_SIZE as u32))?;
+        if frame_max < u32::from(FRAME_MIN_SIZE) {
+            return Err(ErrorKind::FrameMaxTooSmall(u32::from(FRAME_MIN_SIZE)))?;
         }
 
         Ok(TuneOk {

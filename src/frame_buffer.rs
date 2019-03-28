@@ -62,16 +62,13 @@ impl FrameKind for AmqpFrameKind {
     }
 
     fn parse_frame(buf: &[u8]) -> Result<AMQPFrame> {
-        match parse_frame(buf) {
-            Ok((rest, frame)) => {
-                // parse is only successful if there were no errors _and_ it consumed
-                // all of `buf` (Inner calls us with exactly the size of `buf` we said
-                // we need from parse_size()).
-                if rest.is_empty() {
-                    return Ok(frame);
-                }
+        // parse is only successful if there were no errors _and_ it consumed
+        // all of `buf` (Inner calls us with exactly the size of `buf` we said
+        // we need from parse_size()).
+        if let Ok((rest, frame)) = parse_frame(buf) {
+            if rest.is_empty() {
+                return Ok(frame);
             }
-            _ => (),
         }
         Err(ErrorKind::ReceivedMalformed)?
     }

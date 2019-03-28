@@ -26,7 +26,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
             return Ok(());
         }
 
-        Ok(match self {
+        match self {
             HandshakeState::Start(options) => {
                 let start = Start::try_from(0, frame)?;
                 debug!("received handshake {:?}", start);
@@ -80,6 +80,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
             HandshakeState::ServerClosing(_) | HandshakeState::Done(_, _) => {
                 Err(ErrorKind::FrameUnexpected)?
             }
-        })
+        }
+        Ok(())
     }
 }

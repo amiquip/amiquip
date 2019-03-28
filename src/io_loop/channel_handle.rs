@@ -47,7 +47,7 @@ impl Channel0Handle {
 
     pub(crate) fn close_connection(&mut self) -> Result<()> {
         let close = ConnectionClose {
-            reply_code: REPLY_SUCCESS as u16,
+            reply_code: u16::from(REPLY_SUCCESS),
             reply_text: "goodbye".to_string(),
             class_id: 0,
             method_id: 0,
