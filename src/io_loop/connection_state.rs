@@ -228,6 +228,11 @@ impl ConnectionState {
                 let slot = slot_get_mut(inner, n)?;
                 slot.collector.collect_deliver(deliver)?;
             }
+            // Server beginning return of undeliverable content.
+            AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::Return(return_))) => {
+                let slot = slot_get_mut(inner, n)?;
+                slot.collector.collect_return(return_)?;
+            }
             // TODO break this out into other methods so we know which ones we expect
             AMQPFrame::Method(n, method) => {
                 let slot = slot_get(inner, n)?;
@@ -250,6 +255,9 @@ impl ConnectionState {
                                 .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
+                        CollectorResult::Return(return_) => {
+                            warn!("discarding returned data {:?}", return_);
+                        }
                     }
                 }
             }
@@ -265,10 +273,12 @@ impl ConnectionState {
                                 .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
+                        CollectorResult::Return(return_) => {
+                            warn!("discarding returned data {:?}", return_);
+                        }
                     }
                 }
             }
-            //_ => panic!("TODO"),
         })
     }
 }

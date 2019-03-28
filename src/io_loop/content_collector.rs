@@ -1,6 +1,7 @@
-use crate::{AmqpProperties, Delivery, ErrorKind, Result};
+use crate::{AmqpProperties, Delivery, ErrorKind, Result, Return};
 use amq_protocol::frame::AMQPContentHeader;
 use amq_protocol::protocol::basic::Deliver;
+use amq_protocol::protocol::basic::Return as AmqpReturn;
 
 pub(super) struct ContentCollector {
     kind: Option<Kind>,
@@ -8,6 +9,7 @@ pub(super) struct ContentCollector {
 
 pub(super) enum CollectorResult {
     Delivery((String, Delivery)),
+    Return(Return),
 }
 
 impl ContentCollector {
@@ -19,6 +21,16 @@ impl ContentCollector {
         match self.kind.take() {
             None => {
                 self.kind = Some(Kind::Delivery(State::Start(deliver)));
+                Ok(())
+            }
+            Some(_) => Err(ErrorKind::FrameUnexpected)?,
+        }
+    }
+
+    pub(super) fn collect_return(&mut self, return_: AmqpReturn) -> Result<()> {
+        match self.kind.take() {
+            None => {
+                self.kind = Some(Kind::Return(State::Start(return_)));
                 Ok(())
             }
             Some(_) => Err(ErrorKind::FrameUnexpected)?,
@@ -40,6 +52,16 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
+            Some(Kind::Return(state)) => match state.collect_header(header)? {
+                Content::Done(return_) => {
+                    self.kind = None;
+                    Ok(Some(CollectorResult::Return(return_)))
+                }
+                Content::NeedMore(state) => {
+                    self.kind = Some(Kind::Return(state));
+                    Ok(None)
+                }
+            },
             None => Err(ErrorKind::FrameUnexpected)?,
         }
     }
@@ -56,6 +78,16 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
+            Some(Kind::Return(state)) => match state.collect_body(body)? {
+                Content::Done(return_) => {
+                    self.kind = None;
+                    Ok(Some(CollectorResult::Return(return_)))
+                }
+                Content::NeedMore(state) => {
+                    self.kind = Some(Kind::Return(state));
+                    Ok(None)
+                }
+            },
             None => Err(ErrorKind::FrameUnexpected)?,
         }
     }
@@ -63,6 +95,7 @@ impl ContentCollector {
 
 enum Kind {
     Delivery(State<Delivery>),
+    Return(State<Return>),
 }
 
 trait ContentType {
@@ -78,6 +111,15 @@ impl ContentType for Delivery {
 
     fn new(start: Self::Start, buf: Vec<u8>, properties: AmqpProperties) -> Self::Finish {
         Delivery::new(start, buf, properties)
+    }
+}
+
+impl ContentType for Return {
+    type Start = AmqpReturn;
+    type Finish = Return;
+
+    fn new(start: Self::Start, buf: Vec<u8>, properties: AmqpProperties) -> Self::Finish {
+        Return::new(start, buf, properties)
     }
 }
 

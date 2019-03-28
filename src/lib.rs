@@ -13,6 +13,7 @@ mod heartbeats;
 mod io_loop;
 mod notification_listeners;
 mod queue;
+mod return_;
 mod serialize;
 mod stream;
 
@@ -24,10 +25,11 @@ pub use consumer::{Consumer, ConsumerMessage};
 pub use delivery::Delivery;
 pub use errors::ArcError as Error;
 pub use errors::{ErrorKind, Result};
+pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeType};
 pub use io_loop::ConnectionBlockedNotification;
 pub use notification_listeners::NotificationListener;
-pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeType};
 pub use queue::{Queue, QueueDeclareOptions, QueueDeleteOptions};
+pub use return_::Return;
 pub use stream::IoStream;
 
 #[cfg(feature = "native-tls")]
