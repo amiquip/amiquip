@@ -82,6 +82,25 @@ fn try_send_return(slot: &mut ChannelSlot, return_: Return) {
 }
 
 impl ConnectionState {
+    fn client_exception(
+        &mut self,
+        inner: &mut Inner,
+        reply_code: AMQPHardError,
+        reply_text: String,
+    ) -> Result<()> {
+        error!("{} - closing connection", reply_text);
+        let close = ConnectionClose {
+            reply_code: reply_code.get_id(),
+            reply_text,
+            class_id: 0,
+            method_id: 0,
+        };
+        inner.push_method(0, AmqpConnection::Close(close))?;
+        inner.seal_writes();
+        *self = ConnectionState::ClientException;
+        Ok(())
+    }
+
     pub(super) fn process(&mut self, inner: &mut Inner, frame: AMQPFrame) -> Result<()> {
         // bail out if we shouldn't be getting frames
         let ch0_slot = match self {
@@ -147,33 +166,15 @@ impl ConnectionState {
                 let note = ConnectionBlockedNotification::Unblocked;
                 ch0_slot.conn_blocked_listeners.broadcast(note);
             }
-            // TODO handle other expected channel 0 methods
+            // Reject all other expected channel 0 methods
             AMQPFrame::Method(0, other) => {
                 let text = format!("do not know how to handle channel 0 method {:?}", other);
-                error!("{} - closing connection", text);
-                let close = ConnectionClose {
-                    reply_code: AMQPHardError::NOTIMPLEMENTED.get_id(),
-                    reply_text: text,
-                    class_id: 0,
-                    method_id: 0,
-                };
-                inner.push_method(0, AmqpConnection::Close(close))?;
-                inner.seal_writes();
-                *self = ConnectionState::ClientException;
+                self.client_exception(inner, AMQPHardError::NOTIMPLEMENTED, text)?;
             }
             // Reject content frames on channel 0.
             AMQPFrame::Header(0, _, _) | AMQPFrame::Body(0, _) => {
                 let text = format!("received illegal channel 0 frame {:?}", frame);
-                error!("{} - closing connection", text);
-                let close = ConnectionClose {
-                    reply_code: AMQPHardError::NOTALLOWED.get_id(),
-                    reply_text: text,
-                    class_id: 0,
-                    method_id: 0,
-                };
-                inner.push_method(0, AmqpConnection::Close(close))?;
-                inner.seal_writes();
-                *self = ConnectionState::ClientException;
+                self.client_exception(inner, AMQPHardError::NOTALLOWED, text)?;
             }
             // Server-initiated channel close.
             AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::Close(close))) => {
