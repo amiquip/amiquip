@@ -1,4 +1,4 @@
-use crate::{Channel, Consumer, Exchange, FieldTable, Result};
+use crate::{Channel, Consumer, Exchange, FieldTable, Result, Get};
 
 pub struct Queue<'a> {
     channel: &'a Channel,
@@ -26,6 +26,10 @@ impl Queue<'_> {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn get(&self, no_ack: bool) -> Result<Option<Get>> {
+        self.channel.basic_get(self.name.clone(), no_ack)
     }
 
     pub fn consume(

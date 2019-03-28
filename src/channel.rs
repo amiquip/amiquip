@@ -1,9 +1,10 @@
 use crate::io_loop::ChannelHandle;
 use crate::{
-    Consumer, Delivery, ErrorKind, Exchange, ExchangeDeclareOptions, ExchangeType, Queue,
+    Consumer, Delivery, ErrorKind, Exchange, ExchangeDeclareOptions, ExchangeType, Get, Queue,
     QueueDeclareOptions, QueueDeleteOptions, Result, Return,
 };
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
+use amq_protocol::protocol::basic::Get as AmqpGet;
 use amq_protocol::protocol::basic::{
     AMQPProperties, Ack, Cancel, CancelOk, Consume, Publish, Qos, QosOk,
 };
@@ -74,6 +75,17 @@ impl Channel {
             immediate,
         }))?;
         handle.send_content(content.as_ref(), Publish::get_class_id(), properties)
+    }
+
+    pub fn basic_get<S: Into<String>>(&self, queue: S, no_ack: bool) -> Result<Option<Get>> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        handle.get(AmqpGet {
+            ticket: 0,
+            queue: queue.into(),
+            no_ack,
+        })
     }
 
     pub fn basic_consume<S: Into<String>>(

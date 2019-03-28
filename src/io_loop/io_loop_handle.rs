@@ -1,9 +1,10 @@
 use super::{ChannelMessage, ConnectionBlockedNotification, ConsumerMessage, IoLoopMessage};
 use crate::notification_listeners::{NotificationListener, NotificationListeners};
 use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass};
-use crate::{AmqpProperties, Error, ErrorKind, Result, Return};
+use crate::{AmqpProperties, Error, ErrorKind, Get, Result, Return};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Consume;
+use amq_protocol::protocol::basic::Get as AmqpGet;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
@@ -52,6 +53,17 @@ impl IoLoopHandle {
         self.send(IoLoopMessage::SetReturnHandler(handler))
     }
 
+    pub(super) fn get(&mut self, get: AmqpGet) -> Result<Option<Get>> {
+        let buf = self.make_buf(AmqpBasic::Get(get))?;
+        self.send(IoLoopMessage::Send(buf))?;
+        match self.recv()? {
+            ChannelMessage::GetOk(get) => Ok(get),
+            ChannelMessage::Method(_) | ChannelMessage::ConsumeOk(_, _) => {
+                Err(ErrorKind::FrameUnexpected)?
+            }
+        }
+    }
+
     pub(super) fn consume(
         &mut self,
         consume: Consume,
@@ -60,7 +72,9 @@ impl IoLoopHandle {
         self.send(IoLoopMessage::Send(buf))?;
         match self.recv()? {
             ChannelMessage::ConsumeOk(tag, rx) => Ok((tag, rx)),
-            ChannelMessage::Method(_) => Err(ErrorKind::FrameUnexpected)?,
+            ChannelMessage::Method(_) | ChannelMessage::GetOk(_) => {
+                Err(ErrorKind::FrameUnexpected)?
+            }
         }
     }
 
@@ -81,7 +95,9 @@ impl IoLoopHandle {
         self.send(message)?;
         match self.recv()? {
             ChannelMessage::Method(method) => T::try_from(method),
-            ChannelMessage::ConsumeOk(_, _) => Err(ErrorKind::FrameUnexpected)?,
+            ChannelMessage::ConsumeOk(_, _) | ChannelMessage::GetOk(_) => {
+                Err(ErrorKind::FrameUnexpected)?
+            }
         }
     }
 

@@ -1,6 +1,7 @@
-use crate::{AmqpProperties, Delivery, ErrorKind, Result, Return};
+use crate::{AmqpProperties, Delivery, ErrorKind, Get, Result, Return};
 use amq_protocol::frame::AMQPContentHeader;
 use amq_protocol::protocol::basic::Deliver;
+use amq_protocol::protocol::basic::GetOk as AmqpGetOk;
 use amq_protocol::protocol::basic::Return as AmqpReturn;
 
 pub(super) struct ContentCollector {
@@ -10,6 +11,7 @@ pub(super) struct ContentCollector {
 pub(super) enum CollectorResult {
     Delivery((String, Delivery)),
     Return(Return),
+    Get(Get),
 }
 
 impl ContentCollector {
@@ -31,6 +33,16 @@ impl ContentCollector {
         match self.kind.take() {
             None => {
                 self.kind = Some(Kind::Return(State::Start(return_)));
+                Ok(())
+            }
+            Some(_) => Err(ErrorKind::FrameUnexpected)?,
+        }
+    }
+
+    pub(super) fn collect_get(&mut self, get_ok: AmqpGetOk) -> Result<()> {
+        match self.kind.take() {
+            None => {
+                self.kind = Some(Kind::Get(State::Start(get_ok)));
                 Ok(())
             }
             Some(_) => Err(ErrorKind::FrameUnexpected)?,
@@ -62,6 +74,16 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
+            Some(Kind::Get(state)) => match state.collect_header(header)? {
+                Content::Done(get) => {
+                    self.kind = None;
+                    Ok(Some(CollectorResult::Get(get)))
+                }
+                Content::NeedMore(state) => {
+                    self.kind = Some(Kind::Get(state));
+                    Ok(None)
+                }
+            },
             None => Err(ErrorKind::FrameUnexpected)?,
         }
     }
@@ -88,6 +110,16 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
+            Some(Kind::Get(state)) => match state.collect_body(body)? {
+                Content::Done(get) => {
+                    self.kind = None;
+                    Ok(Some(CollectorResult::Get(get)))
+                }
+                Content::NeedMore(state) => {
+                    self.kind = Some(Kind::Get(state));
+                    Ok(None)
+                }
+            },
             None => Err(ErrorKind::FrameUnexpected)?,
         }
     }
@@ -96,6 +128,7 @@ impl ContentCollector {
 enum Kind {
     Delivery(State<Delivery>),
     Return(State<Return>),
+    Get(State<Get>),
 }
 
 trait ContentType {
@@ -123,6 +156,20 @@ impl ContentType for Return {
     }
 }
 
+impl ContentType for Get {
+    type Start = AmqpGetOk;
+    type Finish = Get;
+
+    fn new(get_ok: AmqpGetOk, buf: Vec<u8>, properties: AmqpProperties) -> Self::Finish {
+        let message_count = get_ok.message_count;
+        let delivery = Delivery::new_get_ok(get_ok, buf, properties);
+        Get {
+            delivery,
+            message_count,
+        }
+    }
+}
+
 enum Content<T: ContentType> {
     Done(T::Finish),
     NeedMore(State<T>),
@@ -138,11 +185,7 @@ impl<T: ContentType> State<T> {
         match self {
             State::Start(start) => {
                 if header.body_size == 0 {
-                    Ok(Content::Done(T::new(
-                        start,
-                        Vec::new(),
-                        header.properties,
-                    )))
+                    Ok(Content::Done(T::new(start, Vec::new(), header.properties)))
                 } else {
                     let buf = Vec::with_capacity(header.body_size as usize);
                     Ok(Content::NeedMore(State::Body(start, header, buf)))

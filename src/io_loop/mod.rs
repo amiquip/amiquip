@@ -4,7 +4,7 @@ use crate::frame_buffer::FrameBuffer;
 use crate::notification_listeners::NotificationListeners;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
 use crate::stream::{HandshakeStream, IoStream};
-use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, Result, Return};
+use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, Get, Result, Return};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
 use amq_protocol::protocol::AMQPClass;
@@ -51,6 +51,7 @@ enum IoLoopMessage {
 enum ChannelMessage {
     Method(AMQPClass),
     ConsumeOk(String, CrossbeamReceiver<ConsumerMessage>),
+    GetOk(Option<Get>),
 }
 
 struct ChannelSlot {

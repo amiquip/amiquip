@@ -1,5 +1,5 @@
 use crate::AmqpProperties;
-use amq_protocol::protocol::basic::Deliver;
+use amq_protocol::protocol::basic::{Deliver, GetOk};
 
 #[derive(Clone, Debug)]
 pub struct Delivery {
@@ -28,6 +28,21 @@ impl Delivery {
                 properties,
             },
         )
+    }
+
+    pub(crate) fn new_get_ok(
+        get_ok: GetOk,
+        content: Vec<u8>,
+        properties: AmqpProperties,
+    ) -> Delivery {
+        Delivery {
+            delivery_tag: get_ok.delivery_tag,
+            redelivered: get_ok.redelivered,
+            exchange: get_ok.exchange,
+            routing_key: get_ok.routing_key,
+            content,
+            properties,
+        }
     }
 
     pub fn delivery_tag(&self) -> u64 {

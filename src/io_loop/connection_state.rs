@@ -252,6 +252,16 @@ impl ConnectionState {
                 let slot = slot_get_mut(inner, n)?;
                 slot.collector.collect_return(return_)?;
             }
+            // Server ack for get (message incoming).
+            AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::GetOk(get_ok))) => {
+                let slot = slot_get_mut(inner, n)?;
+                slot.collector.collect_get(get_ok)?;
+            }
+            // Server ack for get (no message).
+            AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::GetEmpty(_))) => {
+                let slot = slot_get(inner, n)?;
+                send(&slot.tx, Ok(ChannelMessage::GetOk(None)))?;
+            }
             // TODO break this out into other methods so we know which ones we expect
             AMQPFrame::Method(n, method) => {
                 let slot = slot_get(inner, n)?;
@@ -277,6 +287,9 @@ impl ConnectionState {
                         CollectorResult::Return(return_) => {
                             try_send_return(slot, return_);
                         }
+                        CollectorResult::Get(get) => {
+                            send(&slot.tx, Ok(ChannelMessage::GetOk(Some(get))))?;
+                        }
                     }
                 }
             }
@@ -294,6 +307,9 @@ impl ConnectionState {
                         }
                         CollectorResult::Return(return_) => {
                             try_send_return(slot, return_);
+                        }
+                        CollectorResult::Get(get) => {
+                            send(&slot.tx, Ok(ChannelMessage::GetOk(Some(get))))?;
                         }
                     }
                 }
