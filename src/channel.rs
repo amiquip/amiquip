@@ -6,7 +6,8 @@ use crate::{
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Get as AmqpGet;
 use amq_protocol::protocol::basic::{
-    AMQPProperties, Ack, Cancel, CancelOk, Consume, Nack, Publish, Qos, QosOk, Reject,
+    AMQPProperties, Ack, Cancel, CancelOk, Consume, Nack, Publish, Qos, QosOk, Recover, RecoverOk,
+    Reject,
 };
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::exchange::Declare as ExchangeDeclare;
@@ -53,6 +54,15 @@ impl Channel {
                 global,
             }))
             .map(|_qos_ok| ())
+    }
+
+    pub fn recover(&self, requeue: bool) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        let handle = inner.get_handle_mut()?;
+
+        handle
+            .call::<_, RecoverOk>(AmqpBasic::Recover(Recover { requeue }))
+            .map(|_recover_ok| ())
     }
 
     pub fn basic_publish<T: AsRef<[u8]>, S0: Into<String>, S1: Into<String>>(

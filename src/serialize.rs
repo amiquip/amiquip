@@ -88,6 +88,11 @@ impl_try_from_class!(
     AMQPClass::Basic,
     AmqpBasic::QosOk
 );
+impl_try_from_class!(
+    amq_protocol::protocol::basic::RecoverOk,
+    AMQPClass::Basic,
+    AmqpBasic::RecoverOk
+);
 
 impl_try_from_class!(
     amq_protocol::protocol::queue::DeclareOk,
