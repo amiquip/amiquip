@@ -82,7 +82,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         }
     }
 
-    pub(crate) fn make_start_ok(&self, start: Start) -> Result<StartOk> {
+    pub(crate) fn make_start_ok(&self, start: Start) -> Result<(StartOk, FieldTable)> {
         // helper to search space-separated strings (mechanisms and locales)
         fn server_supports(server: &str, client: &str) -> bool {
             server.split(" ").any(|s| s == client)
@@ -126,12 +126,15 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
             AMQPValue::FieldTable(capabilities),
         );
 
-        Ok(StartOk {
-            client_properties,
-            mechanism,
-            response: self.auth.response(),
-            locale: self.locale.clone(),
-        })
+        Ok((
+            StartOk {
+                client_properties,
+                mechanism,
+                response: self.auth.response(),
+                locale: self.locale.clone(),
+            },
+            start.server_properties,
+        ))
     }
 
     pub(crate) fn make_tune_ok(&self, tune: Tune) -> Result<TuneOk> {

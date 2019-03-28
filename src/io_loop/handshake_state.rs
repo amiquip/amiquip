@@ -2,7 +2,7 @@ use super::Inner;
 use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::serialize::TryFromAmqpFrame;
-use crate::{ErrorKind, Result};
+use crate::{ErrorKind, Result, FieldTable};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::{Close, CloseOk, OpenOk, Secure, Start, Tune, TuneOk};
@@ -11,11 +11,11 @@ use log::{error, debug};
 #[derive(Debug)]
 pub(super) enum HandshakeState<Auth: Sasl> {
     Start(ConnectionOptions<Auth>),
-    Secure(ConnectionOptions<Auth>),
-    Tune(ConnectionOptions<Auth>),
-    Open(TuneOk),
+    Secure(ConnectionOptions<Auth>, FieldTable),
+    Tune(ConnectionOptions<Auth>, FieldTable),
+    Open(TuneOk, FieldTable),
     ServerClosing(Close),
-    Done(TuneOk),
+    Done(TuneOk, FieldTable),
 }
 
 impl<Auth: Sasl> HandshakeState<Auth> {
@@ -31,23 +31,23 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 let start = Start::try_from(0, frame)?;
                 debug!("received handshake {:?}", start);
 
-                let start_ok = options.make_start_ok(start)?;
+                let (start_ok, server_properties) = options.make_start_ok(start)?;
                 debug!("sending handshake {:?}", start_ok);
                 inner.push_method(0, AmqpConnection::StartOk(start_ok))?;
 
-                *self = HandshakeState::Secure(options.clone());
+                *self = HandshakeState::Secure(options.clone(), server_properties);
             }
-            HandshakeState::Secure(options) => {
+            HandshakeState::Secure(options, server_properties) => {
                 // We currently only support PLAIN and EXTERNAL, neither of which
                 // need a secure/secure-ok
                 if let Ok(secure) = Secure::try_from(0, frame.clone()) {
                     error!("received unsupported handshake {:?}", secure);
                     return Err(ErrorKind::SaslSecureNotSupported)?;
                 }
-                *self = HandshakeState::Tune(options.clone());
+                *self = HandshakeState::Tune(options.clone(), server_properties.clone());
                 return self.process(inner, frame);
             }
-            HandshakeState::Tune(options) => {
+            HandshakeState::Tune(options, server_properties) => {
                 let tune = Tune::try_from(0, frame)?;
                 debug!("received handshake {:?}", tune);
 
@@ -61,9 +61,9 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 debug!("sending handshake {:?}", open);
                 inner.push_method(0, AmqpConnection::Open(open))?;
 
-                *self = HandshakeState::Open(tune_ok);
+                *self = HandshakeState::Open(tune_ok, server_properties.clone());
             }
-            HandshakeState::Open(tune_ok) => {
+            HandshakeState::Open(tune_ok, server_properties) => {
                 // If we sent bad tune params, server might send us a Close.
                 if let Ok(close) = Close::try_from(0, frame.clone()) {
                     inner.push_method(0, AmqpConnection::CloseOk(CloseOk {}))?;
@@ -75,9 +75,9 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 let open_ok = OpenOk::try_from(0, frame)?;
                 debug!("received handshake {:?}", open_ok);
 
-                *self = HandshakeState::Done(tune_ok.clone());
+                *self = HandshakeState::Done(tune_ok.clone(), server_properties.clone());
             }
-            HandshakeState::ServerClosing(_) | HandshakeState::Done(_) => {
+            HandshakeState::ServerClosing(_) | HandshakeState::Done(_, _) => {
                 Err(ErrorKind::FrameUnexpected)?
             }
         })

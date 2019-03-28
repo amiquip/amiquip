@@ -2,7 +2,8 @@ use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::io_loop::{Channel0Handle, IoLoop};
 use crate::{
-    Channel, ConnectionBlockedNotification, ErrorKind, IoStream, NotificationListener, Result,
+    Channel, ConnectionBlockedNotification, ErrorKind, FieldTable, IoStream, NotificationListener,
+    Result,
 };
 use log::debug;
 use std::thread::JoinHandle;
@@ -10,17 +11,6 @@ use std::time::Duration;
 
 #[cfg(feature = "native-tls")]
 use crate::TlsConnector;
-
-pub struct Connection {
-    join_handle: Option<JoinHandle<Result<()>>>,
-    channel0: Channel0Handle,
-}
-
-impl Drop for Connection {
-    fn drop(&mut self) {
-        let _ = self.close_impl();
-    }
-}
 
 pub struct ConnectionTuning {
     pub mem_channel_bound: usize,
@@ -70,6 +60,18 @@ impl ConnectionTuning {
     }
 }
 
+pub struct Connection {
+    join_handle: Option<JoinHandle<Result<()>>>,
+    channel0: Channel0Handle,
+    server_properties: FieldTable,
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        let _ = self.close_impl();
+    }
+}
+
 impl Connection {
     pub fn open<Auth: Sasl, S: IoStream>(
         stream: S,
@@ -77,10 +79,11 @@ impl Connection {
         tuning: ConnectionTuning,
     ) -> Result<Connection> {
         let io_loop = IoLoop::new(tuning)?;
-        let (join_handle, channel0) = io_loop.start(stream, options)?;
+        let (join_handle, server_properties, channel0) = io_loop.start(stream, options)?;
         Ok(Connection {
             join_handle: Some(join_handle),
             channel0,
+            server_properties,
         })
     }
 
@@ -94,11 +97,16 @@ impl Connection {
     ) -> Result<Connection> {
         let stream = connector.into().connect(domain, stream)?;
         let io_loop = IoLoop::new(tuning)?;
-        let (join_handle, channel0) = io_loop.start_tls(stream, options)?;
+        let (join_handle, server_properties, channel0) = io_loop.start_tls(stream, options)?;
         Ok(Connection {
             join_handle: Some(join_handle),
             channel0,
+            server_properties,
         })
+    }
+
+    pub fn server_properties(&self) -> &FieldTable {
+        &self.server_properties
     }
 
     pub fn close(mut self) -> Result<()> {

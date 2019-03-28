@@ -4,7 +4,7 @@ use crate::frame_buffer::FrameBuffer;
 use crate::notification_listeners::NotificationListeners;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
 use crate::stream::{HandshakeStream, IoStream};
-use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, Get, Result, Return};
+use crate::{ConnectionTuning, ConsumerMessage, ErrorKind, FieldTable, Get, Result, Return};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
 use amq_protocol::protocol::AMQPClass;
@@ -168,7 +168,7 @@ impl IoLoop {
         self,
         stream: S,
         options: ConnectionOptions<Auth>,
-    ) -> Result<(JoinHandle<Result<()>>, Channel0Handle)> {
+    ) -> Result<(JoinHandle<Result<()>>, FieldTable, Channel0Handle)> {
         self.poll
             .register(
                 &stream,
@@ -193,7 +193,7 @@ impl IoLoop {
         self,
         stream: S,
         options: ConnectionOptions<Auth>,
-    ) -> Result<(JoinHandle<Result<()>>, Channel0Handle)> {
+    ) -> Result<(JoinHandle<Result<()>>, FieldTable, Channel0Handle)> {
         self.poll
             .register(
                 &stream,
@@ -217,10 +217,14 @@ impl IoLoop {
     fn wait_for_amqp_handshake(
         ch0_handle: IoLoopHandle0,
         join_handle: JoinHandle<Result<()>>,
-        handshake_done_rx: CrossbeamReceiver<usize>,
-    ) -> Result<(JoinHandle<Result<()>>, Channel0Handle)> {
+        handshake_done_rx: CrossbeamReceiver<(usize, FieldTable)>,
+    ) -> Result<(JoinHandle<Result<()>>, FieldTable, Channel0Handle)> {
         match handshake_done_rx.recv() {
-            Ok(frame_max) => Ok((join_handle, Channel0Handle::new(ch0_handle, frame_max))),
+            Ok((frame_max, server_properties)) => Ok((
+                join_handle,
+                server_properties,
+                Channel0Handle::new(ch0_handle, frame_max),
+            )),
 
             // If sender was dropped without sending, the I/O thread has failed; peel out
             // its final error.
@@ -238,7 +242,7 @@ impl IoLoop {
         mut self,
         stream: S,
         options: ConnectionOptions<Auth>,
-        handshake_done_tx: crossbeam_channel::Sender<usize>,
+        handshake_done_tx: crossbeam_channel::Sender<(usize, FieldTable)>,
         ch0_slot: Channel0Slot,
     ) -> Result<()> {
         let stream = self.run_tls_handshake(stream)?;
@@ -265,7 +269,7 @@ impl IoLoop {
         mut self,
         mut stream: S,
         options: ConnectionOptions<Auth>,
-        handshake_done_tx: crossbeam_channel::Sender<usize>,
+        handshake_done_tx: crossbeam_channel::Sender<(usize, FieldTable)>,
         ch0_slot: Channel0Slot,
     ) -> Result<()> {
         self.poll
@@ -284,9 +288,9 @@ impl IoLoop {
                 PollOpt::edge(),
             )
             .context(ErrorKind::Io)?;
-        let tune_ok = self.run_amqp_handshake(&mut stream, options)?;
+        let (tune_ok, server_properties) = self.run_amqp_handshake(&mut stream, options)?;
         let channel_max = tune_ok.channel_max;
-        match handshake_done_tx.send(tune_ok.frame_max as usize) {
+        match handshake_done_tx.send((tune_ok.frame_max as usize, server_properties)) {
             Ok(_) => (),
             Err(_) => return Ok(()),
         }
@@ -298,7 +302,7 @@ impl IoLoop {
         &mut self,
         stream: &mut S,
         options: ConnectionOptions<Auth>,
-    ) -> Result<TuneOk> {
+    ) -> Result<(TuneOk, FieldTable)> {
         let mut state = HandshakeState::Start(options);
         self.run_io_loop(
             stream,
@@ -308,10 +312,10 @@ impl IoLoop {
         )?;
         match state {
             HandshakeState::Start(_)
-            | HandshakeState::Secure(_)
-            | HandshakeState::Tune(_)
-            | HandshakeState::Open(_) => unreachable!(),
-            HandshakeState::Done(tune_ok) => Ok(tune_ok),
+            | HandshakeState::Secure(_, _)
+            | HandshakeState::Tune(_, _)
+            | HandshakeState::Open(_, _) => unreachable!(),
+            HandshakeState::Done(tune_ok, server_properties) => Ok((tune_ok, server_properties)),
             HandshakeState::ServerClosing(close) => Err(ErrorKind::ServerClosedConnection(
                 close.reply_code,
                 close.reply_text,
@@ -346,10 +350,10 @@ impl IoLoop {
     fn is_handshake_done<Auth: Sasl>(&self, state: &HandshakeState<Auth>) -> bool {
         match state {
             HandshakeState::Start(_)
-            | HandshakeState::Secure(_)
-            | HandshakeState::Tune(_)
-            | HandshakeState::Open(_) => false,
-            HandshakeState::Done(_) => true,
+            | HandshakeState::Secure(_, _)
+            | HandshakeState::Tune(_, _)
+            | HandshakeState::Open(_, _) => false,
+            HandshakeState::Done(_, _) => true,
             HandshakeState::ServerClosing(_) => {
                 // server initiated a close (e.g., bad vhost). don't report that we're
                 // done until all our writes have gone out
