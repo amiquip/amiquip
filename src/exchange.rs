@@ -40,6 +40,11 @@ impl Exchange<'_> {
         Exchange { channel, name }
     }
 
+    pub fn direct(channel: &Channel) -> Exchange {
+        let name = "".to_string();
+        Exchange { channel, name }
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
