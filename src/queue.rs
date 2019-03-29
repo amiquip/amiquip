@@ -49,8 +49,15 @@ impl QueueDeclareOptions {
     }
 }
 
+/// Options passed to the server when deleting a queue.
+///
+/// The [`default`](#impl-Default) implementation sets all boolean fields to false.
 pub struct QueueDeleteOptions {
+    /// If true, the server will only delete the queue if it has no consumers. If true and the
+    /// queue _does_ have consumers, the server will close the current channel with an error.
     pub if_unused: bool,
+
+    /// If true, the server will only delete the queue if it has no messages.
     pub if_empty: bool,
 }
 
