@@ -12,7 +12,6 @@ use amq_protocol::protocol::basic::{
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::exchange::Bind as ExchangeBind;
 use amq_protocol::protocol::exchange::BindOk as ExchangeBindOk;
-use amq_protocol::protocol::exchange::Declare as ExchangeDeclare;
 use amq_protocol::protocol::exchange::DeclareOk as ExchangeDeclareOk;
 use amq_protocol::protocol::exchange::Delete as ExchangeDelete;
 use amq_protocol::protocol::exchange::DeleteOk as ExchangeDeleteOk;
@@ -295,56 +294,54 @@ impl Channel {
 
     pub fn exchange_declare<S: Into<String>>(
         &self,
+        type_: ExchangeType,
         exchange: S,
         options: ExchangeDeclareOptions,
     ) -> Result<Exchange> {
-        self.exchange_declare_common(exchange, false, options)
+        let exchange = exchange.into();
+        let declare =
+            AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), false, false));
+        self.inner
+            .borrow_mut()
+            .get_handle_mut()?
+            .call::<_, ExchangeDeclareOk>(declare)
+            .map(|_ok| Exchange::new(self, exchange))
+    }
+
+    pub fn exchange_declare_nowait<S: Into<String>>(
+        &self,
+        type_: ExchangeType,
+        exchange: S,
+        options: ExchangeDeclareOptions,
+    ) -> Result<Exchange> {
+        let exchange = exchange.into();
+        let declare =
+            AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), false, true));
+        self.inner
+            .borrow_mut()
+            .get_handle_mut()?
+            .call::<_, ExchangeDeclareOk>(declare)
+            .map(|_ok| Exchange::new(self, exchange))
     }
 
     pub fn exchange_declare_passive<S: Into<String>>(&self, exchange: S) -> Result<Exchange> {
+        let exchange = exchange.into();
         // per spec, if passive is set all other fields are ignored except nowait (which
         // must be false to be meaningful)
+        let type_ = ExchangeType::Direct;
         let options = ExchangeDeclareOptions {
-            type_: ExchangeType::Direct,
             durable: false,
             auto_delete: false,
             internal: false,
-            nowait: false,
             arguments: FieldTable::new(),
         };
-        self.exchange_declare_common(exchange, true, options)
-    }
-
-    fn exchange_declare_common<S: Into<String>>(
-        &self,
-        exchange: S,
-        passive: bool,
-        options: ExchangeDeclareOptions,
-    ) -> Result<Exchange> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-        let name = exchange.into();
-
-        let declare = AmqpExchange::Declare(ExchangeDeclare {
-            ticket: 0,
-            exchange: name.clone(),
-            passive,
-            type_: options.type_.as_ref().to_string(),
-            durable: options.durable,
-            auto_delete: options.auto_delete,
-            internal: options.internal,
-            nowait: options.nowait,
-            arguments: options.arguments,
-        });
-
-        debug!("declaring exchange: {:?}", declare);
-        if options.nowait {
-            handle.call_nowait(declare)?;
-        } else {
-            let _ = handle.call::<_, ExchangeDeclareOk>(declare)?;
-        }
-
-        Ok(Exchange::new(self, name))
+        let declare =
+            AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), true, false));
+        self.inner
+            .borrow_mut()
+            .get_handle_mut()?
+            .call_nowait(declare)
+            .map(|()| Exchange::new(self, exchange))
     }
 
     pub fn exchange_bind<S0: Into<String>, S1: Into<String>, S2: Into<String>>(

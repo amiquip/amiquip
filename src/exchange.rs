@@ -1,4 +1,5 @@
 use crate::{AmqpProperties, Channel, FieldTable, Result};
+use amq_protocol::protocol::exchange::Declare;
 
 pub enum ExchangeType {
     Direct,
@@ -21,13 +22,34 @@ impl AsRef<str> for ExchangeType {
     }
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct ExchangeDeclareOptions {
-    pub type_: ExchangeType,
     pub durable: bool,
     pub auto_delete: bool,
     pub internal: bool,
-    pub nowait: bool,
     pub arguments: FieldTable,
+}
+
+impl ExchangeDeclareOptions {
+    pub(crate) fn into_declare(
+        self,
+        type_: ExchangeType,
+        name: String,
+        passive: bool,
+        nowait: bool,
+    ) -> Declare {
+        Declare {
+            ticket: 0,
+            exchange: name,
+            passive,
+            type_: type_.as_ref().to_string(),
+            durable: self.durable,
+            auto_delete: self.auto_delete,
+            internal: self.internal,
+            nowait,
+            arguments: self.arguments,
+        }
+    }
 }
 
 pub struct ExchangeDeleteOptions {
