@@ -7,8 +7,8 @@ use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::AMQPProperties;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
-use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
+use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::AMQPClass;
 use cookie_factory::GenError;
 use std::ops::{Index, RangeFrom};
@@ -214,12 +214,12 @@ impl OutputBuffer {
 
     pub fn push_heartbeat(&mut self) {
         // serializing heartbeat cannot fail; safe to unwrap.
-        serialize(&mut self.0, |buf, pos| gen_heartbeat_frame((buf, pos))).unwrap();
+        serialize(&mut self.0, |buf, pos| gen_heartbeat_frame((buf, pos)))
     }
 
     // This can only fail if there is a bug in the serialization library; it is probably
     // safe to unwrap, but little cost to return a Result instead.
-    pub fn push_method<M>(&mut self, channel_id: u16, method: M) -> Result<()>
+    pub fn push_method<M>(&mut self, channel_id: u16, method: M)
     where
         M: IntoAmqpClass,
     {
@@ -235,14 +235,14 @@ impl OutputBuffer {
         class_id: u16,
         length: usize,
         properties: &AMQPProperties,
-    ) -> Result<()> {
+    ) {
         let length = length as u64;
         serialize(&mut self.0, |buf, pos| {
             gen_content_header_frame((buf, pos), channel_id, class_id, length, properties)
         })
     }
 
-    pub(crate) fn push_content_body(&mut self, channel_id: u16, content: &[u8]) -> Result<()> {
+    pub(crate) fn push_content_body(&mut self, channel_id: u16, content: &[u8]) {
         serialize(&mut self.0, |buf, pos| {
             gen_content_body_frame((buf, pos), channel_id, content)
         })
@@ -311,13 +311,11 @@ impl SealableOutputBuffer {
     }
 
     #[inline]
-    pub(super) fn push_method<M>(&mut self, channel_id: u16, method: M) -> Result<()>
+    pub(super) fn push_method<M>(&mut self, channel_id: u16, method: M)
     where
         M: IntoAmqpClass,
     {
-        if self.sealed {
-            Ok(())
-        } else {
+        if !self.sealed {
             self.buf.push_method(channel_id, method)
         }
     }
@@ -362,13 +360,13 @@ impl Index<RangeFrom<usize>> for SealableOutputBuffer {
 fn serialize<F: Fn(&mut [u8], usize) -> StdResult<(&mut [u8], usize), GenError>>(
     buf: &mut Vec<u8>,
     f: F,
-) -> Result<()> {
+) {
     let pos = buf.len();
     loop {
         let resize_to = match f(buf, pos) {
-            Ok(_) => return Ok(()),
+            Ok(_) => return,
             Err(GenError::BufferTooSmall(n)) => n,
-            Err(_) => return Err(ErrorKind::InternalSerializationError)?,
+            Err(err) => unreachable!("impossible serialization error: {:?}", err),
         };
         buf.resize(resize_to, 0);
     }

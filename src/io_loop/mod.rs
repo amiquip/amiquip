@@ -504,7 +504,7 @@ impl IoLoop {
             if events.is_empty() {
                 if let Some(timeout) = &self.poll_timeout {
                     if start_poll.elapsed() > *timeout {
-                        return Err(ErrorKind::SocketPollTimeout)?;
+                        return Err(ErrorKind::PollTimeout)?;
                     }
                 }
                 continue;
@@ -608,7 +608,7 @@ impl Inner {
     }
 
     #[inline]
-    fn push_method<M: IntoAmqpClass>(&mut self, channel_id: u16, method: M) -> Result<()> {
+    fn push_method<M: IntoAmqpClass>(&mut self, channel_id: u16, method: M) {
         self.outbuf.push_method(channel_id, method)
     }
 

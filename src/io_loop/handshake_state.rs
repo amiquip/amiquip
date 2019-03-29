@@ -32,7 +32,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
 
                 let (start_ok, server_properties) = options.make_start_ok(start)?;
                 debug!("sending handshake {:?}", start_ok);
-                inner.push_method(0, AmqpConnection::StartOk(start_ok))?;
+                inner.push_method(0, AmqpConnection::StartOk(start_ok));
 
                 *self = HandshakeState::Secure(options.clone(), server_properties);
             }
@@ -54,18 +54,18 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 inner.start_heartbeats(tune_ok.heartbeat);
 
                 debug!("sending handshake {:?}", tune_ok);
-                inner.push_method(0, AmqpConnection::TuneOk(tune_ok.clone()))?;
+                inner.push_method(0, AmqpConnection::TuneOk(tune_ok.clone()));
 
                 let open = options.make_open();
                 debug!("sending handshake {:?}", open);
-                inner.push_method(0, AmqpConnection::Open(open))?;
+                inner.push_method(0, AmqpConnection::Open(open));
 
                 *self = HandshakeState::Open(tune_ok, server_properties.clone());
             }
             HandshakeState::Open(tune_ok, server_properties) => {
                 // If we sent bad tune params, server might send us a Close.
                 if let Ok(close) = Close::try_from(0, frame.clone()) {
-                    inner.push_method(0, AmqpConnection::CloseOk(CloseOk {}))?;
+                    inner.push_method(0, AmqpConnection::CloseOk(CloseOk {}));
                     inner.seal_writes();
                     *self = HandshakeState::ServerClosing(close);
                     return Ok(());

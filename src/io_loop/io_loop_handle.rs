@@ -39,10 +39,10 @@ impl IoLoopHandle {
         self.channel_id
     }
 
-    fn make_buf<M: IntoAmqpClass>(&mut self, method: M) -> Result<OutputBuffer> {
+    fn make_buf<M: IntoAmqpClass>(&mut self, method: M) -> OutputBuffer {
         debug_assert!(self.buf.is_empty());
-        self.buf.push_method(self.channel_id, method)?;
-        Ok(self.buf.drain_into_new_buf())
+        self.buf.push_method(self.channel_id, method);
+        self.buf.drain_into_new_buf()
     }
 
     pub(super) fn set_return_handler(
@@ -53,7 +53,7 @@ impl IoLoopHandle {
     }
 
     pub(super) fn get(&mut self, get: AmqpGet) -> Result<Option<Get>> {
-        let buf = self.make_buf(AmqpBasic::Get(get))?;
+        let buf = self.make_buf(AmqpBasic::Get(get));
         self.send(IoLoopMessage::Send(buf))?;
         match self.recv()? {
             ChannelMessage::GetOk(get) => Ok(get),
@@ -67,7 +67,7 @@ impl IoLoopHandle {
         &mut self,
         consume: Consume,
     ) -> Result<(String, CrossbeamReceiver<ConsumerMessage>)> {
-        let buf = self.make_buf(AmqpBasic::Consume(consume))?;
+        let buf = self.make_buf(AmqpBasic::Consume(consume));
         self.send(IoLoopMessage::Send(buf))?;
         match self.recv()? {
             ChannelMessage::ConsumeOk(tag, rx) => Ok((tag, rx)),
@@ -81,12 +81,12 @@ impl IoLoopHandle {
         &mut self,
         close: ConnectionClose,
     ) -> Result<ConnectionCloseOk> {
-        let buf = self.make_buf(AmqpConnection::Close(close))?;
+        let buf = self.make_buf(AmqpConnection::Close(close));
         self.call_message(IoLoopMessage::ConnectionClose(buf))
     }
 
     pub(super) fn call<M: IntoAmqpClass, T: TryFromAmqpClass>(&mut self, method: M) -> Result<T> {
-        let buf = self.make_buf(method)?;
+        let buf = self.make_buf(method);
         self.call_message(IoLoopMessage::Send(buf))
     }
 
@@ -101,7 +101,7 @@ impl IoLoopHandle {
     }
 
     pub(super) fn call_nowait<M: IntoAmqpClass>(&mut self, method: M) -> Result<()> {
-        let buf = self.make_buf(method)?;
+        let buf = self.make_buf(method);
         self.send(IoLoopMessage::Send(buf))
     }
 
@@ -113,14 +113,14 @@ impl IoLoopHandle {
     ) -> Result<()> {
         debug_assert!(self.buf.is_empty());
         self.buf
-            .push_content_header(self.channel_id, class_id, len, properties)?;
+            .push_content_header(self.channel_id, class_id, len, properties);
         let buf = self.buf.drain_into_new_buf();
         self.send(IoLoopMessage::Send(buf))
     }
 
     pub(super) fn send_content_body(&mut self, content: &[u8]) -> Result<()> {
         debug_assert!(self.buf.is_empty());
-        self.buf.push_content_body(self.channel_id, content)?;
+        self.buf.push_content_body(self.channel_id, content);
         let buf = self.buf.drain_into_new_buf();
         self.send(IoLoopMessage::Send(buf))
     }

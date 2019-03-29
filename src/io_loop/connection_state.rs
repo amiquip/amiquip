@@ -110,7 +110,7 @@ impl ConnectionState {
             class_id: 0,
             method_id: 0,
         };
-        inner.push_method(0, AmqpConnection::Close(close))?;
+        inner.push_method(0, AmqpConnection::Close(close));
         inner.seal_writes();
         *self = ConnectionState::ClientException;
         Ok(())
@@ -138,7 +138,7 @@ impl ConnectionState {
             AMQPFrame::ProtocolHeader | AMQPFrame::Heartbeat(_) => Err(ErrorKind::FrameUnexpected)?,
             // Server-initiated connection close.
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
-                inner.push_method(0, AmqpConnection::CloseOk(ConnectionCloseOk {}))?;
+                inner.push_method(0, AmqpConnection::CloseOk(ConnectionCloseOk {}));
                 inner.seal_writes();
                 let err =
                     ErrorKind::ServerClosedConnection(close.reply_code, close.reply_text.clone());
@@ -200,7 +200,7 @@ impl ConnectionState {
                 for (_, tx) in slot.consumers.drain() {
                     send(&tx, ConsumerMessage::ServerClosedChannel(err.clone()))?;
                 }
-                inner.push_method(n, AmqpChannel::CloseOk(ChannelCloseOk {}))?;
+                inner.push_method(n, AmqpChannel::CloseOk(ChannelCloseOk {}));
             }
             // Server ack for client-initiated channel close.
             AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))) => {
@@ -236,7 +236,7 @@ impl ConnectionState {
                     send(&tx, ConsumerMessage::ServerCancelled)?;
                 }
                 if !cancel.nowait {
-                    inner.push_method(n, AmqpBasic::CancelOk(CancelOk { consumer_tag }))?;
+                    inner.push_method(n, AmqpBasic::CancelOk(CancelOk { consumer_tag }));
                 }
             }
             // Server ack for client-initiated consumer cancel.
