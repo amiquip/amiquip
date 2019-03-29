@@ -1,9 +1,8 @@
-use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::io_loop::{Channel0Handle, IoLoop};
 use crate::{
     Channel, ConnectionBlockedNotification, ErrorKind, FieldTable, IoStream, NotificationListener,
-    Result,
+    Result, Sasl,
 };
 use log::debug;
 use std::thread::JoinHandle;

@@ -1,10 +1,9 @@
-use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::notification_listeners::NotificationListeners;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
 use crate::{
-    ConnectionTuning, ConsumerMessage, ErrorKind, FieldTable, Get, IoStream, Result, Return,
+    ConnectionTuning, ConsumerMessage, ErrorKind, FieldTable, Get, IoStream, Result, Return, Sasl,
 };
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;

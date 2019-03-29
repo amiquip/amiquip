@@ -16,7 +16,7 @@ mod return_;
 mod serialize;
 mod stream;
 
-pub use auth::Auth;
+pub use auth::{Auth, Sasl};
 pub use channel::Channel;
 pub use connection::{Connection, ConnectionTuning};
 pub use connection_options::ConnectionOptions;

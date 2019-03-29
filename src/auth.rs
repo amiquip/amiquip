@@ -1,11 +1,28 @@
+/// A trait encapsulating the operations required to authenticate to an AMQP server.
+///
+/// # Warning
+///
+/// SASL mechanisms that require AMQP secure / secure-ok exchanges are currently
+/// not supported.
 pub trait Sasl: Default + Clone + Send + 'static {
+    /// The SASL mechanism to report. The server must support this mechanism
+    /// for authentication to succeed.
     fn mechanism(&self) -> String;
+
+    /// The response body to send along with the mechanism.
     fn response(&self) -> String;
 }
 
+/// Built-in authentication mechanisms.
+///
+/// The [`default`](#impl-Default) implementation creates an [`Auth::Plain`](#variant.Plain)
+/// variant with the username and password both set to `guest`.
 #[derive(Debug, Clone)]
 pub enum Auth {
+    /// PLAIN authentication via a username and passwords.
     Plain { username: String, password: String },
+
+    /// EXTERNAL authentication, typically supported via SSL certificates.
     External,
 }
 

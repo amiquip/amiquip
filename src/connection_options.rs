@@ -1,5 +1,4 @@
-use crate::auth::Sasl;
-use crate::{ErrorKind, Result};
+use crate::{ErrorKind, Result, Sasl};
 use amq_protocol::protocol::connection::{Open, Start, StartOk, Tune, TuneOk};
 use amq_protocol::protocol::constants::FRAME_MIN_SIZE;
 use amq_protocol::types::{AMQPValue, FieldTable};

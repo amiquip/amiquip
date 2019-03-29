@@ -1,12 +1,11 @@
 use super::Inner;
-use crate::auth::Sasl;
 use crate::connection_options::ConnectionOptions;
 use crate::serialize::TryFromAmqpFrame;
-use crate::{ErrorKind, Result, FieldTable};
+use crate::{ErrorKind, FieldTable, Result, Sasl};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::{Close, CloseOk, OpenOk, Secure, Start, Tune, TuneOk};
-use log::{error, debug};
+use log::{debug, error};
 
 #[derive(Debug)]
 pub(super) enum HandshakeState<Auth: Sasl> {
