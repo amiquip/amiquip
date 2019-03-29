@@ -1,11 +1,22 @@
 use crate::{AmqpProperties, Channel, FieldTable, Result};
 use amq_protocol::protocol::exchange::Declare;
 
+/// Types of AMQP exchanges.
 pub enum ExchangeType {
+    /// Direct exchange; delivers messages to queues based on the routing key.
     Direct,
+
+    /// Fanout exchange; delivers messages to all bound queues and ignores routing key.
     Fanout,
+
+    /// Topic exchange; delivers messages based on matching between a message routing key and the
+    /// pattern that was used to bind a queue to an exchange.
     Topic,
+
+    /// Headers exchanges; ignores routing key and routes based on message header fields.
     Headers,
+
+    /// Custom exchange type; should begin with "x-".
     Custom(String),
 }
 
