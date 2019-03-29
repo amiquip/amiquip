@@ -33,11 +33,27 @@ impl AsRef<str> for ExchangeType {
     }
 }
 
+/// Options passed to the server when declaring an exchange.
+///
+/// The [`default`](#impl-Default) implementation sets all boolean fields to false and has an empty
+/// set of arguments.
 #[derive(Clone, Debug, Default)]
 pub struct ExchangeDeclareOptions {
+    /// If true, declares exchange as durable (survives server restarts); if false, declares
+    /// exchange as transient (will be deleted on a server restart).
     pub durable: bool,
+
+    /// If true, declare exchange as auto-delete: it will be deleted once no queues are bound to
+    /// it. The server will keep the exchange around for "a short period of time" to allow queues
+    /// to be bound after it is created.
     pub auto_delete: bool,
+
+    /// If true, declare exchange as internal: it may not be used by publishers, but only for
+    /// exchange-to-exchange bindings.
     pub internal: bool,
+
+    /// Extra arguments; these are optional in general, but may be needed for some plugins or
+    /// server-specific features.
     pub arguments: FieldTable,
 }
 
