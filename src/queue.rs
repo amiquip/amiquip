@@ -8,11 +8,29 @@ pub struct Queue<'a> {
     consumer_count: Option<u32>,
 }
 
+/// Options passed to the server when declaring a queue.
+///
+/// The [`default`](#impl-Default) implementation sets all boolean fields to false and has an empty
+/// set of arguments.
 #[derive(Clone, Debug, Default)]
 pub struct QueueDeclareOptions {
+    /// If true, declares queue as durable (survives server restarts); if false, declares queue as
+    /// transient (will be deleted on a server restart).
     pub durable: bool,
+
+    /// If true, declares queue as exclusive: the queue may only be accessed by the current
+    /// connection, and it will be deleted when the current connection is closed.
     pub exclusive: bool,
+
+    /// If true, declares queue as auto-delete: the server will delete it once the last consumer is
+    /// disconnected (either by cancellation or by its channel being closed).
+    ///
+    /// NOTE: If a queue is declared as auto-delete but never has a consumer, it will not be
+    /// deleted.
     pub auto_delete: bool,
+
+    /// Extra arguments; these are optional in general, but may be needed for some plugins or
+    /// server-specific features.
     pub arguments: FieldTable,
 }
 
