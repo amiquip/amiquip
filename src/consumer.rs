@@ -14,13 +14,30 @@ impl Drop for Consumer<'_> {
     }
 }
 
+/// Messages delivered to consumers.
 #[derive(Clone, Debug)]
 pub enum ConsumerMessage {
+    /// A delivered message.
     Delivery(Delivery),
-    Cancelled,
+
+    /// The channel was cancelled by the client; e.g., by calling
+    /// [`Consumer::cancel`](struct.Consumer.html#method.cancel).
+    ClientCancelled,
+
+    /// The channel has been cancelled by the server; e.g., because the queue the consumer is
+    /// attached to was deleted.
+    ServerCancelled,
+
+    /// The client has closed the channel where this consumer was created.
     ClientClosedChannel,
+
+    /// The server has closed the channel where this consumer was created.
     ServerClosedChannel(ErrorKind),
+
+    /// The client has closed the connection where this consumer was created.
     ClientClosedConnection,
+
+    /// The server has closed the connection where this consumer was created.
     ServerClosedConnection(ErrorKind),
 }
 

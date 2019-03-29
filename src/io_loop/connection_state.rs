@@ -233,7 +233,7 @@ impl ConnectionState {
                 let consumer_tag = cancel.consumer_tag;
                 let slot = slot_get_mut(inner, n)?;
                 if let Some(tx) = slot.consumers.remove(&consumer_tag) {
-                    send(&tx, ConsumerMessage::Cancelled)?;
+                    send(&tx, ConsumerMessage::ServerCancelled)?;
                 }
                 if !cancel.nowait {
                     inner.push_method(n, AmqpBasic::CancelOk(CancelOk { consumer_tag }))?;
@@ -250,7 +250,7 @@ impl ConnectionState {
                     ))),
                 )?;
                 if let Some(tx) = consumer {
-                    send(&tx, ConsumerMessage::Cancelled)?;
+                    send(&tx, ConsumerMessage::ClientCancelled)?;
                 }
             }
             // Server beginning delivery of content to a consumer.
