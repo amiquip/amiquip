@@ -4,11 +4,11 @@ use amq_protocol::protocol::basic::{Deliver, GetOk};
 #[derive(Clone, Debug)]
 pub struct Delivery {
     delivery_tag: u64,
-    redelivered: bool,
-    exchange: String,
-    routing_key: String,
-    content: Vec<u8>,
-    properties: AmqpProperties,
+    pub redelivered: bool,
+    pub exchange: String,
+    pub routing_key: String,
+    pub content: Vec<u8>,
+    pub properties: AmqpProperties,
 }
 
 impl Delivery {
@@ -47,29 +47,5 @@ impl Delivery {
 
     pub fn delivery_tag(&self) -> u64 {
         self.delivery_tag
-    }
-
-    pub fn redelivered(&self) -> bool {
-        self.redelivered
-    }
-
-    pub fn exchange(&self) -> &str {
-        &self.exchange
-    }
-
-    pub fn routing_key(&self) -> &str {
-        &self.routing_key
-    }
-
-    pub fn properties(&self) -> &AmqpProperties {
-        &self.properties
-    }
-
-    pub fn content(&self) -> &[u8] {
-        &self.content
-    }
-
-    pub fn into_content(self) -> Vec<u8> {
-        self.content
     }
 }

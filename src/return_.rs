@@ -3,12 +3,12 @@ use amq_protocol::protocol::basic::Return as AmqpReturn;
 
 #[derive(Clone, Debug)]
 pub struct Return {
-    reply_code: u16,
-    reply_text: String,
-    exchange: String,
-    routing_key: String,
-    content: Vec<u8>,
-    properties: AmqpProperties,
+    pub reply_code: u16,
+    pub reply_text: String,
+    pub exchange: String,
+    pub routing_key: String,
+    pub content: Vec<u8>,
+    pub properties: AmqpProperties,
 }
 
 impl Return {
