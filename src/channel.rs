@@ -1,7 +1,8 @@
 use crate::io_loop::ChannelHandle;
+use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
 use crate::{
-    Consumer, Delivery, ErrorKind, Exchange, ExchangeDeclareOptions, ExchangeDeleteOptions,
-    ExchangeType, Get, Queue, QueueDeclareOptions, QueueDeleteOptions, Result, Return,
+    Consumer, Delivery, Exchange, ExchangeDeclareOptions, ExchangeDeleteOptions, ExchangeType, Get,
+    Queue, QueueDeclareOptions, QueueDeleteOptions, Result, Return,
 };
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Get as AmqpGet;
@@ -31,41 +32,63 @@ use amq_protocol::types::FieldTable;
 use crossbeam_channel::Receiver;
 use log::{debug, trace};
 use std::cell::RefCell;
+use std::fmt::Debug;
 
 pub struct Channel {
-    inner: RefCell<Inner>,
+    inner: RefCell<ChannelHandle>,
+    closed: bool,
+}
+
+impl Drop for Channel {
+    fn drop(&mut self) {
+        let _ = self.close_impl();
+    }
 }
 
 impl Channel {
     pub(crate) fn new(handle: ChannelHandle) -> Channel {
-        let inner = RefCell::new(Inner::new(handle));
-        Channel { inner }
+        Channel {
+            inner: RefCell::new(handle),
+            closed: false,
+        }
     }
 
-    pub fn close(self) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        inner.close()
+    pub fn close(mut self) -> Result<()> {
+        self.close_impl()
+    }
+
+    fn close_impl(&mut self) -> Result<()> {
+        // this can only happen if we're called from drop (since close() takes self),
+        // in which case the return value doesn't matter.
+        if self.closed {
+            return Ok(());
+        }
+
+        // go ahead and set closed to trigger the above codepath if we're about to
+        // be dropped.
+        self.closed = true;
+        self.inner.borrow_mut().close()
+    }
+
+    fn call<M: IntoAmqpClass + Debug, T: TryFromAmqpClass>(&self, method: M) -> Result<T> {
+        self.inner.borrow_mut().call(method)
+    }
+
+    fn call_nowait<M: IntoAmqpClass + Debug>(&self, method: M) -> Result<()> {
+        self.inner.borrow_mut().call_nowait(method)
     }
 
     pub fn qos(&self, prefetch_size: u32, prefetch_count: u16, global: bool) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
-        handle
-            .call::<_, QosOk>(AmqpBasic::Qos(Qos {
-                prefetch_size,
-                prefetch_count,
-                global,
-            }))
-            .map(|_qos_ok| ())
+        self.call::<_, QosOk>(AmqpBasic::Qos(Qos {
+            prefetch_size,
+            prefetch_count,
+            global,
+        }))
+        .map(|_qos_ok| ())
     }
 
     pub fn recover(&self, requeue: bool) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
-        handle
-            .call::<_, RecoverOk>(AmqpBasic::Recover(Recover { requeue }))
+        self.call::<_, RecoverOk>(AmqpBasic::Recover(Recover { requeue }))
             .map(|_recover_ok| ())
     }
 
@@ -79,23 +102,18 @@ impl Channel {
         properties: &AMQPProperties,
     ) -> Result<()> {
         let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
-        handle.call_nowait(AmqpBasic::Publish(Publish {
+        inner.call_nowait(AmqpBasic::Publish(Publish {
             ticket: 0,
             exchange: exchange.into(),
             routing_key: routing_key.into(),
             mandatory,
             immediate,
         }))?;
-        handle.send_content(content.as_ref(), Publish::get_class_id(), properties)
+        inner.send_content(content.as_ref(), Publish::get_class_id(), properties)
     }
 
     pub fn basic_get<S: Into<String>>(&self, queue: S, no_ack: bool) -> Result<Option<Get>> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
-        handle.get(AmqpGet {
+        self.inner.borrow_mut().get(AmqpGet {
             ticket: 0,
             queue: queue.into(),
             no_ack,
@@ -110,15 +128,12 @@ impl Channel {
         exclusive: bool,
         arguments: FieldTable,
     ) -> Result<Consumer> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         // NOTE: We currently don't support nowait consumers for two reasons:
         // 1. We always let the server pick the consumption tag, so without
         //    the consume-ok we don't have a tag to cancel.
         // 2. The I/O loop allocates the channel to send deliveries when it
         //    receives consume-ok.
-        let (tag, rx) = handle.consume(Consume {
+        let (tag, rx) = self.inner.borrow_mut().consume(Consume {
             ticket: 0,
             queue: queue.into(),
             consumer_tag: String::new(),
@@ -132,11 +147,8 @@ impl Channel {
     }
 
     pub fn listen_for_returns(&self) -> Result<Receiver<Return>> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         let (tx, rx) = crossbeam_channel::unbounded();
-        handle.set_return_handler(Some(tx))?;
+        self.inner.borrow_mut().set_return_handler(Some(tx))?;
         Ok(rx)
     }
 
@@ -146,11 +158,7 @@ impl Channel {
         options: QueueDeclareOptions,
     ) -> Result<Queue> {
         let declare = AmqpQueue::Declare(options.into_declare(queue.into(), false, false));
-        let ok = self
-            .inner
-            .borrow_mut()
-            .get_handle_mut()?
-            .call::<_, QueueDeclareOk>(declare)?;
+        let ok = self.call::<_, QueueDeclareOk>(declare)?;
         Ok(Queue::new(
             self,
             ok.queue,
@@ -166,10 +174,7 @@ impl Channel {
     ) -> Result<Queue> {
         let queue = queue.into();
         let declare = AmqpQueue::Declare(options.into_declare(queue.clone(), false, true));
-        self.inner
-            .borrow_mut()
-            .get_handle_mut()?
-            .call_nowait(declare)?;
+        self.call_nowait(declare)?;
         Ok(Queue::new(self, queue, None, None))
     }
 
@@ -183,11 +188,7 @@ impl Channel {
             arguments: FieldTable::new(),
         };
         let declare = AmqpQueue::Declare(options.into_declare(queue.into(), true, false));
-        let ok = self
-            .inner
-            .borrow_mut()
-            .get_handle_mut()?
-            .call::<_, QueueDeclareOk>(declare)?;
+        let ok = self.call::<_, QueueDeclareOk>(declare)?;
         Ok(Queue::new(
             self,
             ok.queue,
@@ -204,9 +205,6 @@ impl Channel {
         nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         let bind = AmqpQueue::Bind(QueueBind {
             ticket: 0,
             queue: queue.into(),
@@ -215,12 +213,10 @@ impl Channel {
             nowait,
             arguments,
         });
-
-        debug!("binding queue to exchange: {:?}", bind);
         if nowait {
-            handle.call_nowait(bind)
+            self.call_nowait(bind)
         } else {
-            handle.call::<_, QueueBindOk>(bind).map(|_| ())
+            self.call::<_, QueueBindOk>(bind).map(|_| ())
         }
     }
 
@@ -231,9 +227,6 @@ impl Channel {
         routing_key: S2,
         arguments: FieldTable,
     ) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         let unbind = AmqpQueue::Unbind(QueueUnbind {
             ticket: 0,
             queue: queue.into(),
@@ -243,13 +236,10 @@ impl Channel {
         });
 
         debug!("unbinding queue from exchange: {:?}", unbind);
-        handle.call::<_, QueueUnbindOk>(unbind).map(|_| ())
+        self.call::<_, QueueUnbindOk>(unbind).map(|_| ())
     }
 
     pub fn queue_purge<S: Into<String>>(&self, queue: S, nowait: bool) -> Result<Option<u32>> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         let purge = AmqpQueue::Purge(QueuePurge {
             ticket: 0,
             queue: queue.into(),
@@ -258,10 +248,9 @@ impl Channel {
 
         debug!("purging queue: {:?}", purge);
         if nowait {
-            handle.call_nowait(purge).map(|()| None)
+            self.call_nowait(purge).map(|()| None)
         } else {
-            handle
-                .call::<_, QueuePurgeOk>(purge)
+            self.call::<_, QueuePurgeOk>(purge)
                 .map(|ok| Some(ok.message_count))
         }
     }
@@ -271,9 +260,6 @@ impl Channel {
         queue: S,
         options: QueueDeleteOptions,
     ) -> Result<Option<u32>> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         let delete = AmqpQueue::Delete(QueueDelete {
             ticket: 0,
             queue: queue.into(),
@@ -284,10 +270,9 @@ impl Channel {
 
         debug!("deleting queue: {:?}", delete);
         if options.nowait {
-            handle.call_nowait(delete).map(|()| None)
+            self.call_nowait(delete).map(|()| None)
         } else {
-            handle
-                .call::<_, QueueDeleteOk>(delete)
+            self.call::<_, QueueDeleteOk>(delete)
                 .map(|ok| Some(ok.message_count))
         }
     }
@@ -301,10 +286,7 @@ impl Channel {
         let exchange = exchange.into();
         let declare =
             AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), false, false));
-        self.inner
-            .borrow_mut()
-            .get_handle_mut()?
-            .call::<_, ExchangeDeclareOk>(declare)
+        self.call::<_, ExchangeDeclareOk>(declare)
             .map(|_ok| Exchange::new(self, exchange))
     }
 
@@ -317,10 +299,7 @@ impl Channel {
         let exchange = exchange.into();
         let declare =
             AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), false, true));
-        self.inner
-            .borrow_mut()
-            .get_handle_mut()?
-            .call::<_, ExchangeDeclareOk>(declare)
+        self.call::<_, ExchangeDeclareOk>(declare)
             .map(|_ok| Exchange::new(self, exchange))
     }
 
@@ -337,10 +316,7 @@ impl Channel {
         };
         let declare =
             AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), true, false));
-        self.inner
-            .borrow_mut()
-            .get_handle_mut()?
-            .call_nowait(declare)
+        self.call_nowait(declare)
             .map(|()| Exchange::new(self, exchange))
     }
 
@@ -352,9 +328,6 @@ impl Channel {
         nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         let bind = AmqpExchange::Bind(ExchangeBind {
             ticket: 0,
             destination: destination.into(),
@@ -366,9 +339,9 @@ impl Channel {
 
         debug!("binding exchange: {:?}", bind);
         if nowait {
-            handle.call_nowait(bind)
+            self.call_nowait(bind)
         } else {
-            handle.call::<_, ExchangeBindOk>(bind).map(|_bind_ok| ())
+            self.call::<_, ExchangeBindOk>(bind).map(|_bind_ok| ())
         }
     }
 
@@ -380,9 +353,6 @@ impl Channel {
         nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         let unbind = AmqpExchange::Unbind(ExchangeUnbind {
             ticket: 0,
             destination: destination.into(),
@@ -394,10 +364,9 @@ impl Channel {
 
         debug!("unbinding exchange: {:?}", unbind);
         if nowait {
-            handle.call_nowait(unbind)
+            self.call_nowait(unbind)
         } else {
-            handle
-                .call::<_, ExchangeUnbindOk>(unbind)
+            self.call::<_, ExchangeUnbindOk>(unbind)
                 .map(|_unbind_ok| ())
         }
     }
@@ -407,9 +376,6 @@ impl Channel {
         exchange: S,
         options: ExchangeDeleteOptions,
     ) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         let delete = AmqpExchange::Delete(ExchangeDelete {
             ticket: 0,
             exchange: exchange.into(),
@@ -419,27 +385,21 @@ impl Channel {
 
         debug!("deleting exchange: {:?}", delete);
         if options.nowait {
-            handle.call_nowait(delete)
+            self.call_nowait(delete)
         } else {
-            handle.call::<_, ExchangeDeleteOk>(delete).map(|_| ())
+            self.call::<_, ExchangeDeleteOk>(delete).map(|_| ())
         }
     }
 
     pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
-        handle.call_nowait(AmqpBasic::Ack(Ack {
+        self.call_nowait(AmqpBasic::Ack(Ack {
             delivery_tag: delivery.delivery_tag(),
             multiple,
         }))
     }
 
     pub fn basic_nack(&self, delivery: &Delivery, multiple: bool, requeue: bool) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
-        handle.call_nowait(AmqpBasic::Nack(Nack {
+        self.call_nowait(AmqpBasic::Nack(Nack {
             delivery_tag: delivery.delivery_tag(),
             multiple,
             requeue,
@@ -447,66 +407,19 @@ impl Channel {
     }
 
     pub fn basic_reject(&self, delivery: &Delivery, requeue: bool) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
-        handle.call_nowait(AmqpBasic::Reject(Reject {
+        self.call_nowait(AmqpBasic::Reject(Reject {
             delivery_tag: delivery.delivery_tag(),
             requeue,
         }))
     }
 
     pub fn basic_cancel(&self, consumer: &Consumer) -> Result<()> {
-        let mut inner = self.inner.borrow_mut();
-        let handle = inner.get_handle_mut()?;
-
         debug!("cancelling consumer {}", consumer.consumer_tag());
-        let cancel_ok = handle.call::<_, CancelOk>(AmqpBasic::Cancel(Cancel {
+        let cancel_ok = self.call::<_, CancelOk>(AmqpBasic::Cancel(Cancel {
             consumer_tag: consumer.consumer_tag().to_string(),
             nowait: false,
         }))?;
         trace!("got cancel-ok {:?}", cancel_ok);
         Ok(())
-    }
-}
-
-struct Inner {
-    handle: ChannelHandle,
-    closed: bool,
-}
-
-impl Drop for Inner {
-    fn drop(&mut self) {
-        let _ = self.close();
-    }
-}
-
-impl Inner {
-    fn new(handle: ChannelHandle) -> Inner {
-        Inner {
-            handle,
-            closed: false,
-        }
-    }
-
-    fn get_handle_mut(&mut self) -> Result<&mut ChannelHandle> {
-        if self.closed {
-            Err(ErrorKind::ClientClosedChannel)?
-        } else {
-            Ok(&mut self.handle)
-        }
-    }
-
-    fn close(&mut self) -> Result<()> {
-        if self.closed {
-            return Ok(());
-        }
-
-        let result = self.handle.close();
-        // Even if the close call fails, treat ourselves as closed. There's little
-        // hope to recovering from a failed close call, and this prevents us from
-        // attempting to close again when dropped.
-        self.closed = true;
-        result
     }
 }
