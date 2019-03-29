@@ -1,9 +1,9 @@
 use crate::connection_options::ConnectionOptions;
 use crate::io_loop::{Channel0Handle, IoLoop};
 use crate::{
-    Channel, ConnectionBlockedNotification, ErrorKind, FieldTable, IoStream, NotificationListener,
-    Result, Sasl,
+    Channel, ConnectionBlockedNotification, ErrorKind, FieldTable, IoStream, Result, Sasl,
 };
+use crossbeam_channel::Receiver;
 use log::debug;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -112,8 +112,12 @@ impl Connection {
         self.close_impl()
     }
 
-    pub fn register_blocked_listener(&self) -> NotificationListener<ConnectionBlockedNotification> {
-        self.channel0.register_conn_blocked_listener()
+    pub fn listen_for_connection_blocked(
+        &mut self,
+    ) -> Result<Receiver<ConnectionBlockedNotification>> {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        self.channel0.set_blocked_tx(tx)?;
+        Ok(rx)
     }
 
     fn close_impl(&mut self) -> Result<()> {

@@ -1,5 +1,4 @@
 use super::{ChannelMessage, ConnectionBlockedNotification, ConsumerMessage, IoLoopMessage};
-use crate::notification_listeners::{NotificationListener, NotificationListeners};
 use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass};
 use crate::{AmqpProperties, Error, ErrorKind, Get, Result, Return};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
@@ -158,7 +157,7 @@ impl IoLoopHandle {
 
 pub(super) struct IoLoopHandle0 {
     common: IoLoopHandle,
-    conn_blocked_listeners: NotificationListeners<ConnectionBlockedNotification>,
+    set_blocked_tx: MioSyncSender<CrossbeamSender<ConnectionBlockedNotification>>,
     alloc_chan_req_tx: MioSyncSender<Option<u16>>,
     alloc_chan_rep_rx: CrossbeamReceiver<Result<IoLoopHandle>>,
 }
@@ -166,13 +165,13 @@ pub(super) struct IoLoopHandle0 {
 impl IoLoopHandle0 {
     pub(super) fn new(
         common: IoLoopHandle,
-        conn_blocked_listeners: NotificationListeners<ConnectionBlockedNotification>,
+        set_blocked_tx: MioSyncSender<CrossbeamSender<ConnectionBlockedNotification>>,
         alloc_chan_req_tx: MioSyncSender<Option<u16>>,
         alloc_chan_rep_rx: CrossbeamReceiver<Result<IoLoopHandle>>,
     ) -> IoLoopHandle0 {
         IoLoopHandle0 {
             common,
-            conn_blocked_listeners,
+            set_blocked_tx,
             alloc_chan_req_tx,
             alloc_chan_rep_rx,
         }
@@ -187,10 +186,13 @@ impl IoLoopHandle0 {
             .map_err(|_| Error::from(ErrorKind::EventLoopDropped))?
     }
 
-    pub(super) fn register_conn_blocked_listener(
-        &self,
-    ) -> NotificationListener<ConnectionBlockedNotification> {
-        self.conn_blocked_listeners.register_listener()
+    pub(super) fn set_blocked_tx(
+        &mut self,
+        tx: CrossbeamSender<ConnectionBlockedNotification>,
+    ) -> Result<()> {
+        self.set_blocked_tx
+            .send(tx)
+            .map_err(|_| self.common.check_recv_for_error())
     }
 }
 

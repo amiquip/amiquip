@@ -83,6 +83,19 @@ fn try_send_return(slot: &mut ChannelSlot, return_: Return) {
     warn!("discarding returned data {:?}", return_);
 }
 
+// When we set up a blocked connection listener, it's just a crossbeam channel. If it gets
+// dropped, we don't want to error; just start discarding blocked notifications.
+fn try_send_blocked(slot: &mut Channel0Slot, note: ConnectionBlockedNotification) {
+    if let Some(tx) = &slot.blocked_tx {
+        match tx.try_send(note) {
+            Ok(()) => (),
+            Err(_) => {
+                slot.blocked_tx = None;
+            }
+        }
+    }
+}
+
 impl ConnectionState {
     fn client_exception(
         &mut self,
@@ -160,13 +173,13 @@ impl ConnectionState {
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Blocked(blocked))) => {
                 warn!("server has blocked connection; reason = {}", blocked.reason);
                 let note = ConnectionBlockedNotification::Blocked(blocked.reason);
-                ch0_slot.conn_blocked_listeners.broadcast(note);
+                try_send_blocked(ch0_slot, note);
             }
             // Server has unblocked publishes
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Unblocked(_))) => {
                 warn!("server has unblocked connection");
                 let note = ConnectionBlockedNotification::Unblocked;
-                ch0_slot.conn_blocked_listeners.broadcast(note);
+                try_send_blocked(ch0_slot, note);
             }
             // Reject all other expected channel 0 methods
             AMQPFrame::Method(0, other) => {

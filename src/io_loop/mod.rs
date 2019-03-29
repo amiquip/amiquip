@@ -1,6 +1,5 @@
 use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
-use crate::notification_listeners::NotificationListeners;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
 use crate::{
     ConnectionTuning, ConsumerMessage, ErrorKind, FieldTable, Get, IoStream, Result, Return, Sasl,
@@ -44,6 +43,7 @@ use io_loop_handle::{IoLoopHandle, IoLoopHandle0};
 const STREAM: Token = Token(u16::max_value() as usize + 1);
 const HEARTBEAT: Token = Token(u16::max_value() as usize + 2);
 const ALLOC_CHANNEL: Token = Token(u16::max_value() as usize + 3);
+const SET_BLOCKED_TX: Token = Token(u16::max_value() as usize + 4);
 
 enum IoLoopMessage {
     Send(OutputBuffer),
@@ -102,7 +102,8 @@ pub enum ConnectionBlockedNotification {
 
 struct Channel0Slot {
     common: ChannelSlot,
-    conn_blocked_listeners: NotificationListeners<ConnectionBlockedNotification>,
+    set_blocked_rx: MioReceiver<CrossbeamSender<ConnectionBlockedNotification>>,
+    blocked_tx: Option<CrossbeamSender<ConnectionBlockedNotification>>,
     alloc_chan_req_rx: MioReceiver<Option<u16>>,
     alloc_chan_rep_tx: CrossbeamSender<Result<IoLoopHandle>>,
 }
@@ -111,19 +112,19 @@ impl Channel0Slot {
     fn new(mio_channel_bound: usize) -> (Channel0Slot, IoLoopHandle0) {
         let (common_slot, common_handle) = ChannelSlot::new(mio_channel_bound, 0);
         let (alloc_chan_req_tx, alloc_chan_req_rx) = mio_sync_channel(1);
+        let (set_blocked_tx, set_blocked_rx) = mio_sync_channel(1);
         let (alloc_chan_rep_tx, alloc_chan_rep_rx) = crossbeam_channel::bounded(1);
-
-        let conn_blocked_listeners = NotificationListeners::new();
 
         let slot = Channel0Slot {
             common: common_slot,
-            conn_blocked_listeners: conn_blocked_listeners.clone(),
+            set_blocked_rx,
+            blocked_tx: None,
             alloc_chan_req_rx,
             alloc_chan_rep_tx,
         };
         let handle = IoLoopHandle0::new(
             common_handle,
-            conn_blocked_listeners,
+            set_blocked_tx,
             alloc_chan_req_tx,
             alloc_chan_rep_rx,
         );
@@ -288,6 +289,14 @@ impl IoLoop {
             .context(ErrorKind::Io)?;
         self.poll
             .register(
+                &ch0_slot.set_blocked_rx,
+                SET_BLOCKED_TX,
+                Ready::readable(),
+                PollOpt::edge(),
+            )
+            .context(ErrorKind::Io)?;
+        self.poll
+            .register(
                 &ch0_slot.alloc_chan_req_rx,
                 ALLOC_CHANNEL,
                 Ready::readable(),
@@ -416,6 +425,16 @@ impl IoLoop {
                 }
             }
             HEARTBEAT => self.inner.process_heartbeat_timers()?,
+            SET_BLOCKED_TX => match state {
+                ConnectionState::Steady(ch0_slot) => {
+                    self.handle_set_blocked_tx(ch0_slot)?
+                }
+                ConnectionState::ServerClosing(_)
+                | ConnectionState::ClientException
+                | ConnectionState::ClientClosed => {
+                    unreachable!("ch0 slot cannot be readable after it is dropped")
+                }
+            },
             ALLOC_CHANNEL => match &state {
                 ConnectionState::Steady(ch0_slot) => {
                     self.inner.allocate_channel(ch0_slot, &self.poll)?
@@ -442,6 +461,17 @@ impl IoLoop {
             _ => unreachable!(),
         }
         Ok(())
+    }
+
+    fn handle_set_blocked_tx(&self, ch0_slot: &mut Channel0Slot) -> Result<()> {
+        loop {
+            let tx = match ch0_slot.set_blocked_rx.try_recv() {
+                Ok(tx) => tx,
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
+            };
+            ch0_slot.blocked_tx = Some(tx);
+        }
     }
 
     fn is_connection_done(&self, state: &ConnectionState) -> bool {

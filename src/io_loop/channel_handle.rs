@@ -2,7 +2,7 @@ use super::{
     ConnectionBlockedNotification, ConsumerMessage, CrossbeamReceiver, IoLoopHandle, IoLoopHandle0,
 };
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
-use crate::{Get, NotificationListener, Result, Return};
+use crate::{Get, Result, Return};
 use amq_protocol::protocol::basic::Get as AmqpGet;
 use amq_protocol::protocol::basic::{AMQPProperties, Consume};
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
@@ -39,10 +39,11 @@ impl Channel0Handle {
         Channel0Handle { handle, frame_max }
     }
 
-    pub(crate) fn register_conn_blocked_listener(
-        &self,
-    ) -> NotificationListener<ConnectionBlockedNotification> {
-        self.handle.register_conn_blocked_listener()
+    pub(crate) fn set_blocked_tx(
+        &mut self,
+        tx: CrossbeamSender<ConnectionBlockedNotification>,
+    ) -> Result<()> {
+        self.handle.set_blocked_tx(tx)
     }
 
     pub(crate) fn close_connection(&mut self) -> Result<()> {
