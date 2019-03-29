@@ -70,7 +70,7 @@ impl FrameKind for AmqpFrameKind {
                 return Ok(frame);
             }
         }
-        Err(ErrorKind::ReceivedMalformed)?
+        Err(ErrorKind::MalformedFrame)?
     }
 }
 
@@ -153,7 +153,7 @@ mod tests {
         fn parse_frame(buf: &[u8]) -> Result<Self::Frame> {
             assert!(buf.len() == buf[1] as usize);
             if buf.len() == 6 && &buf[2..] == b"fail" {
-                Err(ErrorKind::ReceivedMalformed)?
+                Err(ErrorKind::MalformedFrame)?
             } else {
                 Ok(Vec::from(buf))
             }
@@ -267,7 +267,7 @@ mod tests {
         let mut buf = make_buffer();
         let res = buf.read_from(&mut c, |_| panic!("should not be called"));
         assert!(res.is_err());
-        assert_eq!(*res.unwrap_err().kind(), ErrorKind::ReceivedMalformed);
+        assert_eq!(*res.unwrap_err().kind(), ErrorKind::MalformedFrame);
     }
 
     #[test]

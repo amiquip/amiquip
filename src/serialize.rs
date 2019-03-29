@@ -152,7 +152,7 @@ impl<T: TryFromAmqpClass> TryFromAmqpFrame for T {
                 if expected_id == channel_id {
                     Self::try_from(method)
                 } else {
-                    Err(ErrorKind::FrameUnexpectedChannelId)?
+                    Err(ErrorKind::FrameUnexpected)?
                 }
             }
             _ => Err(ErrorKind::FrameUnexpected)?,

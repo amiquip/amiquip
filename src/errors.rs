@@ -1,4 +1,3 @@
-use amq_protocol::frame::AMQPFrame;
 use failure::{Backtrace, Context, Fail};
 use std::sync::Arc;
 use std::{fmt, result};
@@ -40,12 +39,13 @@ pub enum ErrorKind {
     #[fail(display = "underlying socket closed unexpectedly")]
     UnexpectedSocketClose,
 
-    #[fail(display = "received malformed data")]
-    ReceivedMalformed,
+    #[fail(display = "received malformed data - expected AMQP frame")]
+    MalformedFrame,
 
     #[fail(display = "I/O error")]
     Io,
 
+    #[cfg(feature = "native-tls")]
     #[fail(display = "TLS handshake failed")]
     TlsHandshake,
 
@@ -58,10 +58,10 @@ pub enum ErrorKind {
     #[fail(display = "requested frame max is too small (min = {})", _0)]
     FrameMaxTooSmall(u32),
 
-    #[fail(display = "timeout occurred while waiting for socket events")]
-    SocketPollTimeout,
+    //#[fail(display = "timeout occurred while waiting for socket events")]
+    //SocketPollTimeout,
 
-    #[fail(display = "internal serialization error (THIS IS A BUG)")]
+    #[fail(display = "internal serialization error (this is a bug in amiquip)")]
     InternalSerializationError,
 
     #[fail(display = "SASL secure/secure-ok exchanges are not supported")]
@@ -69,14 +69,6 @@ pub enum ErrorKind {
 
     #[fail(display = "invalid credentials")]
     InvalidCredentials,
-
-    // TODO remove after rewriting event loop
-    #[fail(display = "handshake failure - server sent a frame unexpectedly")]
-    HandshakeUnexpectedServerFrame(AMQPFrame),
-
-    // TODO remove after rewriting event loop
-    #[fail(display = "handshake protocol failure - expected {} frame", _0)]
-    HandshakeWrongServerFrame(&'static str, AMQPFrame),
 
     #[fail(display = "missed heartbeats from server")]
     MissedServerHeartbeats,
@@ -101,9 +93,6 @@ pub enum ErrorKind {
 
     #[fail(display = "channel {} dropped without being cleanly closed", _0)]
     ChannelDropped(u16),
-
-    #[fail(display = "AMQP protocol error - received message for unexpected channel")]
-    FrameUnexpectedChannelId,
 
     #[fail(display = "AMQP protocol error - received unexpected frame")]
     FrameUnexpected,
