@@ -52,11 +52,6 @@ impl ExchangeDeclareOptions {
     }
 }
 
-pub struct ExchangeDeleteOptions {
-    pub if_unused: bool,
-    pub nowait: bool,
-}
-
 pub struct Exchange<'a> {
     channel: &'a Channel,
     name: String,
@@ -98,47 +93,87 @@ impl Exchange<'_> {
         &self,
         other: &Exchange,
         routing_key: S,
-        nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_bind(self.name(), other.name(), routing_key, nowait, arguments)
+            .exchange_bind(self.name(), other.name(), routing_key, arguments)
+    }
+
+    pub fn bind_to_source_nowait<S: Into<String>>(
+        &self,
+        other: &Exchange,
+        routing_key: S,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        self.channel
+            .exchange_bind_nowait(self.name(), other.name(), routing_key, arguments)
     }
 
     pub fn bind_to_destination<S: Into<String>>(
         &self,
         other: &Exchange,
         routing_key: S,
-        nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_bind(other.name(), self.name(), routing_key, nowait, arguments)
+            .exchange_bind(other.name(), self.name(), routing_key, arguments)
+    }
+
+    pub fn bind_to_destination_nowait<S: Into<String>>(
+        &self,
+        other: &Exchange,
+        routing_key: S,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        self.channel
+            .exchange_bind_nowait(other.name(), self.name(), routing_key, arguments)
     }
 
     pub fn unbind_from_source<S: Into<String>>(
         &self,
         other: &Exchange,
         routing_key: S,
-        nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_unbind(self.name(), other.name(), routing_key, nowait, arguments)
+            .exchange_unbind(self.name(), other.name(), routing_key, arguments)
+    }
+
+    pub fn unbind_from_source_nowait<S: Into<String>>(
+        &self,
+        other: &Exchange,
+        routing_key: S,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        self.channel
+            .exchange_unbind_nowait(self.name(), other.name(), routing_key, arguments)
     }
 
     pub fn unbind_from_destination<S: Into<String>>(
         &self,
         other: &Exchange,
         routing_key: S,
-        nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_unbind(other.name(), self.name(), routing_key, nowait, arguments)
+            .exchange_unbind(other.name(), self.name(), routing_key, arguments)
     }
 
-    pub fn delete(self, options: ExchangeDeleteOptions) -> Result<()> {
-        self.channel.exchange_delete(self.name(), options)
+    pub fn unbind_from_destination_nowait<S: Into<String>>(
+        &self,
+        other: &Exchange,
+        routing_key: S,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        self.channel
+            .exchange_unbind_nowait(other.name(), self.name(), routing_key, arguments)
+    }
+
+    pub fn delete(self, if_unused: bool) -> Result<()> {
+        self.channel.exchange_delete(self.name(), if_unused)
+    }
+
+    pub fn delete_nowait(self, if_unused: bool) -> Result<()> {
+        self.channel.exchange_delete_nowait(self.name(), if_unused)
     }
 }

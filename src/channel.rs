@@ -1,8 +1,8 @@
 use crate::io_loop::ChannelHandle;
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
 use crate::{
-    Consumer, Delivery, Exchange, ExchangeDeclareOptions, ExchangeDeleteOptions, ExchangeType, Get,
-    Queue, QueueDeclareOptions, QueueDeleteOptions, Result, Return,
+    Consumer, Delivery, Exchange, ExchangeDeclareOptions, ExchangeType, Get, Queue,
+    QueueDeclareOptions, QueueDeleteOptions, Result, Return,
 };
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Get as AmqpGet;
@@ -22,7 +22,6 @@ use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::queue::Bind as QueueBind;
 use amq_protocol::protocol::queue::BindOk as QueueBindOk;
 use amq_protocol::protocol::queue::DeclareOk as QueueDeclareOk;
-use amq_protocol::protocol::queue::Delete as QueueDelete;
 use amq_protocol::protocol::queue::DeleteOk as QueueDeleteOk;
 use amq_protocol::protocol::queue::Purge as QueuePurge;
 use amq_protocol::protocol::queue::PurgeOk as QueuePurgeOk;
@@ -30,7 +29,6 @@ use amq_protocol::protocol::queue::Unbind as QueueUnbind;
 use amq_protocol::protocol::queue::UnbindOk as QueueUnbindOk;
 use amq_protocol::types::FieldTable;
 use crossbeam_channel::Receiver;
-use log::{debug, trace};
 use std::cell::RefCell;
 use std::fmt::Debug;
 
@@ -202,7 +200,6 @@ impl Channel {
         queue: S0,
         exchange: S1,
         routing_key: S2,
-        nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpQueue::Bind(QueueBind {
@@ -210,14 +207,28 @@ impl Channel {
             queue: queue.into(),
             exchange: exchange.into(),
             routing_key: routing_key.into(),
-            nowait,
+            nowait: false,
             arguments,
         });
-        if nowait {
-            self.call_nowait(bind)
-        } else {
-            self.call::<_, QueueBindOk>(bind).map(|_| ())
-        }
+        self.call::<_, QueueBindOk>(bind).map(|_ok| ())
+    }
+
+    pub fn queue_bind_nowait<S0: Into<String>, S1: Into<String>, S2: Into<String>>(
+        &self,
+        queue: S0,
+        exchange: S1,
+        routing_key: S2,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        let bind = AmqpQueue::Bind(QueueBind {
+            ticket: 0,
+            queue: queue.into(),
+            exchange: exchange.into(),
+            routing_key: routing_key.into(),
+            nowait: true,
+            arguments,
+        });
+        self.call_nowait(bind)
     }
 
     pub fn queue_unbind<S0: Into<String>, S1: Into<String>, S2: Into<String>>(
@@ -234,47 +245,45 @@ impl Channel {
             routing_key: routing_key.into(),
             arguments,
         });
-
-        debug!("unbinding queue from exchange: {:?}", unbind);
         self.call::<_, QueueUnbindOk>(unbind).map(|_| ())
     }
 
-    pub fn queue_purge<S: Into<String>>(&self, queue: S, nowait: bool) -> Result<Option<u32>> {
+    pub fn queue_purge<S: Into<String>>(&self, queue: S) -> Result<u32> {
         let purge = AmqpQueue::Purge(QueuePurge {
             ticket: 0,
             queue: queue.into(),
-            nowait,
+            nowait: false,
         });
+        self.call::<_, QueuePurgeOk>(purge)
+            .map(|ok| ok.message_count)
+    }
 
-        debug!("purging queue: {:?}", purge);
-        if nowait {
-            self.call_nowait(purge).map(|()| None)
-        } else {
-            self.call::<_, QueuePurgeOk>(purge)
-                .map(|ok| Some(ok.message_count))
-        }
+    pub fn queue_purge_nowait<S: Into<String>>(&self, queue: S) -> Result<()> {
+        let purge = AmqpQueue::Purge(QueuePurge {
+            ticket: 0,
+            queue: queue.into(),
+            nowait: true,
+        });
+        self.call_nowait(purge)
     }
 
     pub fn queue_delete<S: Into<String>>(
         &self,
         queue: S,
         options: QueueDeleteOptions,
-    ) -> Result<Option<u32>> {
-        let delete = AmqpQueue::Delete(QueueDelete {
-            ticket: 0,
-            queue: queue.into(),
-            if_unused: options.if_unused,
-            if_empty: options.if_empty,
-            nowait: options.nowait,
-        });
+    ) -> Result<u32> {
+        let delete = AmqpQueue::Delete(options.into_delete(queue.into(), false));
+        self.call::<_, QueueDeleteOk>(delete)
+            .map(|ok| ok.message_count)
+    }
 
-        debug!("deleting queue: {:?}", delete);
-        if options.nowait {
-            self.call_nowait(delete).map(|()| None)
-        } else {
-            self.call::<_, QueueDeleteOk>(delete)
-                .map(|ok| Some(ok.message_count))
-        }
+    pub fn queue_delete_nowait<S: Into<String>>(
+        &self,
+        queue: S,
+        options: QueueDeleteOptions,
+    ) -> Result<()> {
+        let delete = AmqpQueue::Delete(options.into_delete(queue.into(), true));
+        self.call_nowait(delete)
     }
 
     pub fn exchange_declare<S: Into<String>>(
@@ -325,7 +334,6 @@ impl Channel {
         destination: S0,
         source: S1,
         routing_key: S2,
-        nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpExchange::Bind(ExchangeBind {
@@ -333,16 +341,28 @@ impl Channel {
             destination: destination.into(),
             source: source.into(),
             routing_key: routing_key.into(),
-            nowait,
+            nowait: false,
             arguments,
         });
+        self.call::<_, ExchangeBindOk>(bind).map(|_bind_ok| ())
+    }
 
-        debug!("binding exchange: {:?}", bind);
-        if nowait {
-            self.call_nowait(bind)
-        } else {
-            self.call::<_, ExchangeBindOk>(bind).map(|_bind_ok| ())
-        }
+    pub fn exchange_bind_nowait<S0: Into<String>, S1: Into<String>, S2: Into<String>>(
+        &self,
+        destination: S0,
+        source: S1,
+        routing_key: S2,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        let bind = AmqpExchange::Bind(ExchangeBind {
+            ticket: 0,
+            destination: destination.into(),
+            source: source.into(),
+            routing_key: routing_key.into(),
+            nowait: true,
+            arguments,
+        });
+        self.call_nowait(bind)
     }
 
     pub fn exchange_unbind<S0: Into<String>, S1: Into<String>, S2: Into<String>>(
@@ -350,7 +370,6 @@ impl Channel {
         destination: S0,
         source: S1,
         routing_key: S2,
-        nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
         let unbind = AmqpExchange::Unbind(ExchangeUnbind {
@@ -358,37 +377,53 @@ impl Channel {
             destination: destination.into(),
             source: source.into(),
             routing_key: routing_key.into(),
-            nowait,
+            nowait: false,
             arguments,
         });
-
-        debug!("unbinding exchange: {:?}", unbind);
-        if nowait {
-            self.call_nowait(unbind)
-        } else {
-            self.call::<_, ExchangeUnbindOk>(unbind)
-                .map(|_unbind_ok| ())
-        }
+        self.call::<_, ExchangeUnbindOk>(unbind)
+            .map(|_unbind_ok| ())
     }
 
-    pub fn exchange_delete<S: Into<String>>(
+    pub fn exchange_unbind_nowait<S0: Into<String>, S1: Into<String>, S2: Into<String>>(
+        &self,
+        destination: S0,
+        source: S1,
+        routing_key: S2,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        let unbind = AmqpExchange::Unbind(ExchangeUnbind {
+            ticket: 0,
+            destination: destination.into(),
+            source: source.into(),
+            routing_key: routing_key.into(),
+            nowait: true,
+            arguments,
+        });
+        self.call_nowait(unbind)
+    }
+
+    pub fn exchange_delete<S: Into<String>>(&self, exchange: S, if_unused: bool) -> Result<()> {
+        let delete = AmqpExchange::Delete(ExchangeDelete {
+            ticket: 0,
+            exchange: exchange.into(),
+            if_unused,
+            nowait: false,
+        });
+        self.call::<_, ExchangeDeleteOk>(delete).map(|_ok| ())
+    }
+
+    pub fn exchange_delete_nowait<S: Into<String>>(
         &self,
         exchange: S,
-        options: ExchangeDeleteOptions,
+        if_unused: bool,
     ) -> Result<()> {
         let delete = AmqpExchange::Delete(ExchangeDelete {
             ticket: 0,
             exchange: exchange.into(),
-            if_unused: options.if_unused,
-            nowait: options.nowait,
+            if_unused,
+            nowait: true,
         });
-
-        debug!("deleting exchange: {:?}", delete);
-        if options.nowait {
-            self.call_nowait(delete)
-        } else {
-            self.call::<_, ExchangeDeleteOk>(delete).map(|_| ())
-        }
+        self.call_nowait(delete)
     }
 
     pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
@@ -414,12 +449,13 @@ impl Channel {
     }
 
     pub fn basic_cancel(&self, consumer: &Consumer) -> Result<()> {
-        debug!("cancelling consumer {}", consumer.consumer_tag());
-        let cancel_ok = self.call::<_, CancelOk>(AmqpBasic::Cancel(Cancel {
+        // NOTE: We currently don't support nowait cancel for related reasons
+        // to not supproting nowait consume - we want the cancel-ok to clean
+        // up channels in the I/O loop.
+        self.call::<_, CancelOk>(AmqpBasic::Cancel(Cancel {
             consumer_tag: consumer.consumer_tag().to_string(),
             nowait: false,
-        }))?;
-        trace!("got cancel-ok {:?}", cancel_ok);
-        Ok(())
+        }))
+        .map(|_ok| ())
     }
 }

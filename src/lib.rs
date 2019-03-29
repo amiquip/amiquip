@@ -24,7 +24,7 @@ pub use consumer::{Consumer, ConsumerMessage};
 pub use delivery::Delivery;
 pub use errors::ArcError as Error;
 pub use errors::{ErrorKind, Result};
-pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeDeleteOptions, ExchangeType};
+pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeType};
 pub use get::Get;
 pub use io_loop::ConnectionBlockedNotification;
 pub use notification_listeners::NotificationListener;

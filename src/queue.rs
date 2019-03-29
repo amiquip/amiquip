@@ -1,5 +1,5 @@
 use crate::{Channel, Consumer, Delivery, Exchange, FieldTable, Get, Result};
-use amq_protocol::protocol::queue::Declare;
+use amq_protocol::protocol::queue::{Declare, Delete};
 
 pub struct Queue<'a> {
     channel: &'a Channel,
@@ -17,10 +17,10 @@ pub struct QueueDeclareOptions {
 }
 
 impl QueueDeclareOptions {
-    pub(crate) fn into_declare(self, name: String, passive: bool, nowait: bool) -> Declare {
+    pub(crate) fn into_declare(self, queue: String, passive: bool, nowait: bool) -> Declare {
         Declare {
             ticket: 0,
-            queue: name,
+            queue,
             passive,
             durable: self.durable,
             exclusive: self.exclusive,
@@ -34,7 +34,18 @@ impl QueueDeclareOptions {
 pub struct QueueDeleteOptions {
     pub if_unused: bool,
     pub if_empty: bool,
-    pub nowait: bool,
+}
+
+impl QueueDeleteOptions {
+    pub(crate) fn into_delete(self, queue: String, nowait: bool) -> Delete {
+        Delete {
+            ticket: 0,
+            queue,
+            if_unused: self.if_unused,
+            if_empty: self.if_empty,
+            nowait,
+        }
+    }
 }
 
 impl Queue<'_> {
@@ -89,11 +100,21 @@ impl Queue<'_> {
         &self,
         exchange: &Exchange,
         routing_key: S,
-        nowait: bool,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .queue_bind(self.name(), exchange.name(), routing_key, nowait, arguments)
+            .queue_bind(self.name(), exchange.name(), routing_key, arguments)
+    }
+
+    #[inline]
+    pub fn bind_nowait<S: Into<String>>(
+        &self,
+        exchange: &Exchange,
+        routing_key: S,
+        arguments: FieldTable,
+    ) -> Result<()> {
+        self.channel
+            .queue_bind_nowait(self.name(), exchange.name(), routing_key, arguments)
     }
 
     #[inline]
@@ -108,13 +129,23 @@ impl Queue<'_> {
     }
 
     #[inline]
-    pub fn purge(&self, nowait: bool) -> Result<Option<u32>> {
-        self.channel.queue_purge(self.name(), nowait)
+    pub fn purge(&self) -> Result<u32> {
+        self.channel.queue_purge(self.name())
     }
 
     #[inline]
-    pub fn delete(self, options: QueueDeleteOptions) -> Result<Option<u32>> {
+    pub fn purge_nowait(&self) -> Result<()> {
+        self.channel.queue_purge_nowait(self.name())
+    }
+
+    #[inline]
+    pub fn delete(self, options: QueueDeleteOptions) -> Result<u32> {
         self.channel.queue_delete(self.name(), options)
+    }
+
+    #[inline]
+    pub fn delete_nowait(self, options: QueueDeleteOptions) -> Result<()> {
+        self.channel.queue_delete_nowait(self.name(), options)
     }
 
     #[inline]
