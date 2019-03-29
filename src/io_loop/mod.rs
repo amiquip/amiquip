@@ -21,7 +21,7 @@ use std::collections::hash_map::HashMap;
 use std::io;
 use std::sync::mpsc::TryRecvError;
 use std::thread::{Builder, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "native-tls")]
 use crate::stream::HandshakeStream;
@@ -475,20 +475,21 @@ impl IoLoop {
         let mut events = Events::with_capacity(128);
         let mut listening_to_channels = true;
         loop {
+            let start_poll = Instant::now();
             self.poll
                 .poll(&mut events, self.poll_timeout)
                 .context(ErrorKind::Io)?;
             if events.is_empty() {
-                // TODO we get spurious wakeups when (e.g.) channels are closed and
-                // the receiver goes away. Need to check for poll timeout some other
-                // way...
-                //return Err(ErrorKind::SocketPollTimeout)?;
+                if let Some(timeout) = &self.poll_timeout {
+                    if start_poll.elapsed() > *timeout {
+                        return Err(ErrorKind::SocketPollTimeout)?;
+                    }
+                }
                 continue;
             }
 
             let had_data_to_write = self.inner.has_data_to_write();
 
-            trace!("-- processing poll events --");
             for event in events.iter() {
                 handle_event(self, stream, state, event)?;
             }
@@ -502,19 +503,13 @@ impl IoLoop {
             // channels (other than channel 0), and don't reregister until we're down to
             // buffered_writes_low_water.
             if listening_to_channels && self.inner.outbuf.len() > self.buffered_writes_high_water {
-                debug!(
-                    "{} bytes buffered to write; blocking channels internally",
-                    self.inner.outbuf.len()
-                );
+                debug!("passed high water mark for buffered writes; blocking channels internally",);
                 self.inner.deregister_nonzero_channels(&self.poll)?;
                 listening_to_channels = false;
             } else if !listening_to_channels
                 && self.inner.outbuf.len() <= self.buffered_writes_low_water
             {
-                debug!(
-                    "down to {} bytes buffered to write; unblocking channels internally (TODO low water mark)",
-                    self.inner.outbuf.len()
-                );
+                debug!("returned below low water mark for buffered writes; resuming channels",);
                 self.inner.reregister_nonzero_channels(&self.poll)?;
                 listening_to_channels = true;
             }
@@ -529,7 +524,7 @@ impl IoLoop {
             // writable) if we had data to write after the last poll; otherwise we know
             // we were already registered as readable only and don't need to rereg.
             if self.inner.has_data_to_write() {
-                trace!("ending poll loop with data still to write - reregistering for writable");
+                trace!("reregistering socket for readable or writable");
                 self.poll
                     .reregister(
                         stream,
@@ -539,7 +534,7 @@ impl IoLoop {
                     )
                     .context(ErrorKind::Io)?;
             } else if had_data_to_write {
-                trace!("had queued data but now we don't - waiting for socket to be readable");
+                trace!("reregistering socket for readable only");
                 self.poll
                     .reregister(stream, STREAM, Ready::readable(), PollOpt::edge())
                     .context(ErrorKind::Io)?;
@@ -599,7 +594,8 @@ impl Inner {
     fn start_heartbeats(&mut self, interval: u16) {
         if interval > 0 {
             debug!("starting heartbeat timers ({} sec)", interval);
-            self.heartbeats.start(Duration::from_secs(u64::from(interval)));
+            self.heartbeats
+                .start(Duration::from_secs(u64::from(interval)));
         }
     }
 

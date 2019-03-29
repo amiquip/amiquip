@@ -58,8 +58,8 @@ pub enum ErrorKind {
     #[fail(display = "requested frame max is too small (min = {})", _0)]
     FrameMaxTooSmall(u32),
 
-    //#[fail(display = "timeout occurred while waiting for socket events")]
-    //SocketPollTimeout,
+    #[fail(display = "timeout occurred while waiting for socket events")]
+    SocketPollTimeout,
 
     #[fail(display = "internal serialization error (this is a bug in amiquip)")]
     InternalSerializationError,
