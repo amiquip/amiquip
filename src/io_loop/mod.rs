@@ -800,7 +800,6 @@ impl Inner {
         }
 
         // Wrote everything we have - use clear instead of .drain_written().
-        // TODO see if more writes are incoming from clients first?
         self.outbuf.clear();
         Ok(())
     }
