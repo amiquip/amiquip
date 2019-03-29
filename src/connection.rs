@@ -1,8 +1,6 @@
 use crate::connection_options::ConnectionOptions;
 use crate::io_loop::{Channel0Handle, IoLoop};
-use crate::{
-    Channel, ConnectionBlockedNotification, ErrorKind, FieldTable, IoStream, Result, Sasl,
-};
+use crate::{Channel, ErrorKind, FieldTable, IoStream, Result, Sasl};
 use crossbeam_channel::Receiver;
 use log::debug;
 use std::thread::JoinHandle;
@@ -10,6 +8,20 @@ use std::time::Duration;
 
 #[cfg(feature = "native-tls")]
 use crate::TlsConnector;
+
+/// Asynchronous notifications sent by the server when it temporarily blocks a connection,
+/// typically due to a resource alarm.
+///
+/// Use [`Connection::listen_for_connection_blocked`](struct.Connection.html#method.listen_for_connection_blocked)
+/// to receive these notifications.
+#[derive(Debug, Clone)]
+pub enum ConnectionBlockedNotification {
+    /// The connection has been blocked for the given reason.
+    Blocked(String),
+
+    /// The connection has been unblocked.
+    Unblocked,
+}
 
 pub struct ConnectionTuning {
     pub mem_channel_bound: usize,

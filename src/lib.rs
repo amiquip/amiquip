@@ -17,14 +17,13 @@ mod stream;
 
 pub use auth::{Auth, Sasl};
 pub use channel::Channel;
-pub use connection::{Connection, ConnectionTuning};
+pub use connection::{Connection, ConnectionBlockedNotification, ConnectionTuning};
 pub use connection_options::ConnectionOptions;
 pub use consumer::{Consumer, ConsumerMessage};
 pub use delivery::Delivery;
 pub use errors::{Error, ErrorKind, Result};
 pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeType};
 pub use get::Get;
-pub use io_loop::ConnectionBlockedNotification;
 pub use queue::{Queue, QueueDeclareOptions, QueueDeleteOptions};
 pub use return_::Return;
 pub use stream::IoStream;

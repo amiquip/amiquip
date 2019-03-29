@@ -2,7 +2,8 @@ use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
 use crate::{
-    ConnectionTuning, ConsumerMessage, ErrorKind, FieldTable, Get, IoStream, Result, Return, Sasl,
+    ConnectionBlockedNotification, ConnectionTuning, ConsumerMessage, ErrorKind, FieldTable, Get,
+    IoStream, Result, Return, Sasl,
 };
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
@@ -92,12 +93,6 @@ impl ChannelSlot {
 
         (channel_slot, loop_handle)
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum ConnectionBlockedNotification {
-    Blocked(String),
-    Unblocked,
 }
 
 struct Channel0Slot {
@@ -426,9 +421,7 @@ impl IoLoop {
             }
             HEARTBEAT => self.inner.process_heartbeat_timers()?,
             SET_BLOCKED_TX => match state {
-                ConnectionState::Steady(ch0_slot) => {
-                    self.handle_set_blocked_tx(ch0_slot)?
-                }
+                ConnectionState::Steady(ch0_slot) => self.handle_set_blocked_tx(ch0_slot)?,
                 ConnectionState::ServerClosing(_)
                 | ConnectionState::ClientException
                 | ConnectionState::ClientClosed => {
