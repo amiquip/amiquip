@@ -1,4 +1,4 @@
-use crate::AmqpProperties;
+use crate::{AmqpProperties, Channel, Result};
 use amq_protocol::protocol::basic::{Deliver, GetOk};
 
 #[derive(Clone, Debug)]
@@ -45,7 +45,23 @@ impl Delivery {
         }
     }
 
+    #[inline]
     pub fn delivery_tag(&self) -> u64 {
         self.delivery_tag
+    }
+
+    #[inline]
+    pub fn ack(&self, channel: &Channel, multiple: bool) -> Result<()> {
+        channel.basic_ack(self, multiple)
+    }
+
+    #[inline]
+    pub fn nack(&self, channel: &Channel, multiple: bool, requeue: bool) -> Result<()> {
+        channel.basic_nack(self, multiple, requeue)
+    }
+
+    #[inline]
+    pub fn reject(&self, channel: &Channel, requeue: bool) -> Result<()> {
+        channel.basic_reject(self, requeue)
     }
 }

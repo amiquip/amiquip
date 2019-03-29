@@ -426,14 +426,14 @@ impl Channel {
         self.call_nowait(delete)
     }
 
-    pub fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
+    pub(crate) fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
         self.call_nowait(AmqpBasic::Ack(Ack {
             delivery_tag: delivery.delivery_tag(),
             multiple,
         }))
     }
 
-    pub fn basic_nack(&self, delivery: &Delivery, multiple: bool, requeue: bool) -> Result<()> {
+    pub(crate) fn basic_nack(&self, delivery: &Delivery, multiple: bool, requeue: bool) -> Result<()> {
         self.call_nowait(AmqpBasic::Nack(Nack {
             delivery_tag: delivery.delivery_tag(),
             multiple,
@@ -441,14 +441,14 @@ impl Channel {
         }))
     }
 
-    pub fn basic_reject(&self, delivery: &Delivery, requeue: bool) -> Result<()> {
+    pub(crate) fn basic_reject(&self, delivery: &Delivery, requeue: bool) -> Result<()> {
         self.call_nowait(AmqpBasic::Reject(Reject {
             delivery_tag: delivery.delivery_tag(),
             requeue,
         }))
     }
 
-    pub fn basic_cancel(&self, consumer: &Consumer) -> Result<()> {
+    pub(crate) fn basic_cancel(&self, consumer: &Consumer) -> Result<()> {
         // NOTE: We currently don't support nowait cancel for related reasons
         // to not supproting nowait consume - we want the cancel-ok to clean
         // up channels in the I/O loop.
