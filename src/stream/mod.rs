@@ -9,6 +9,7 @@ pub(crate) trait HandshakeStream: Evented + Send + 'static {
     fn progress_handshake(&mut self) -> Result<Option<Self::Stream>>;
 }
 
+/// Combination trait for readable, writable streams that can be polled by mio.
 pub trait IoStream: Read + Write + Evented + Send + 'static {}
 
 impl IoStream for TcpStream {}

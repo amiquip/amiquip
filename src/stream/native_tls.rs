@@ -5,10 +5,11 @@ use mio::{Evented, Poll, PollOpt, Ready, Token};
 use native_tls::{HandshakeError, MidHandshakeTlsStream};
 use std::io::{self, Read, Write};
 
+/// Newtype wrapper around a `native_tls::TlsConnector` to make it usable by amiquip's I/O loop.
 pub struct TlsConnector(native_tls::TlsConnector);
 
 impl TlsConnector {
-    pub fn connect<S>(&self, domain: &str, stream: S) -> Result<TlsHandshakeStream<S>>
+    pub(crate) fn connect<S>(&self, domain: &str, stream: S) -> Result<TlsHandshakeStream<S>>
     where
         S: Read + Write,
     {
@@ -27,7 +28,7 @@ impl From<native_tls::TlsConnector> for TlsConnector {
     }
 }
 
-pub struct TlsHandshakeStream<S> {
+pub(crate) struct TlsHandshakeStream<S> {
     inner: Option<InnerHandshake<S>>,
 }
 
@@ -102,7 +103,7 @@ impl<S: Evented + Read + Write> Evented for TlsHandshakeStream<S> {
     }
 }
 
-pub struct TlsStream<S>(native_tls::TlsStream<S>);
+pub(crate) struct TlsStream<S>(native_tls::TlsStream<S>);
 
 impl<S: Evented + Read + Write + Send + 'static> IoStream for TlsStream<S> {}
 
