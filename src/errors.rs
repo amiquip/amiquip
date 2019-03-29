@@ -4,36 +4,33 @@ use std::sync::Arc;
 use std::{fmt, result};
 
 /// A type alias for handling errors throughout amiquip.
-pub type Result<T> = result::Result<T, ArcError>;
-
-#[derive(Debug, Clone)]
-pub struct ArcError(pub Arc<Error>);
+pub type Result<T> = result::Result<T, Error>;
 
 /// An error that can occur from amiquip.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Error {
-    ctx: Context<ErrorKind>,
+    ctx: Arc<Context<ErrorKind>>,
 }
 
-impl ArcError {
+impl Error {
     pub fn kind(&self) -> &ErrorKind {
-        self.0.ctx.get_context()
+        self.ctx.get_context()
     }
 }
 
-impl Fail for ArcError {
+impl Fail for Error {
     fn cause(&self) -> Option<&Fail> {
-        self.0.ctx.cause()
+        self.ctx.cause()
     }
 
     fn backtrace(&self) -> Option<&Backtrace> {
-        self.0.ctx.backtrace()
+        self.ctx.backtrace()
     }
 }
 
-impl fmt::Display for ArcError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.ctx.fmt(f)
+        self.ctx.fmt(f)
     }
 }
 
@@ -129,10 +126,16 @@ pub enum ErrorKind {
     #[fail(display = "I/O thread died unexpectedly: {}", _0)]
     IoThreadPanic(String),
 
-    #[fail(display = "server sent duplicate consumer tag for channel {}: {}", _0, _1)]
+    #[fail(
+        display = "server sent duplicate consumer tag for channel {}: {}",
+        _0, _1
+    )]
     DuplicateConsumerTag(u16, String),
 
-    #[fail(display = "received delivery with unknown consumer tag for channel {}: {}", _0, _1)]
+    #[fail(
+        display = "received delivery with unknown consumer tag for channel {}: {}",
+        _0, _1
+    )]
     UnknownConsumerTag(u16, String),
 
     #[doc(hidden)]
@@ -140,20 +143,14 @@ pub enum ErrorKind {
     __Nonexhaustive,
 }
 
-impl From<ErrorKind> for ArcError {
-    fn from(kind: ErrorKind) -> ArcError {
-        ArcError(Arc::new(Error::from(Context::new(kind))))
+impl From<ErrorKind> for Error {
+    fn from(kind: ErrorKind) -> Error {
+        Error::from(Context::new(kind))
     }
 }
 
 impl From<Context<ErrorKind>> for Error {
     fn from(ctx: Context<ErrorKind>) -> Error {
-        Error { ctx }
-    }
-}
-
-impl From<Context<ErrorKind>> for ArcError {
-    fn from(ctx: Context<ErrorKind>) -> ArcError {
-        ArcError(Arc::new(Error { ctx }))
+        Error { ctx: Arc::new(ctx) }
     }
 }
