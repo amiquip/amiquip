@@ -43,11 +43,3 @@ pub use amq_protocol::types::FieldTable;
 mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
