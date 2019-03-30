@@ -21,11 +21,9 @@ indexmap = "1.0"
 url = "1.7"
 native-tls = { version = "*", optional = true }
 
-# only for test binary - remove later
-env_logger = "0.6"
-
 [build-dependencies]
 built = "0.3"
 
 [dev-dependencies]
+env_logger = "0.6"
 mockstream = "0.0.3"
