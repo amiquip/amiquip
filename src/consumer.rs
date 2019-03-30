@@ -1,18 +1,6 @@
 use crate::{Channel, Delivery, ErrorKind, Result};
 use crossbeam_channel::Receiver;
-
-pub struct Consumer<'a> {
-    channel: &'a Channel,
-    consumer_tag: String,
-    rx: Receiver<ConsumerMessage>,
-    cancelled: bool,
-}
-
-impl Drop for Consumer<'_> {
-    fn drop(&mut self) {
-        let _ = self.cancel();
-    }
-}
+use std::cell::Cell;
 
 /// Messages delivered to consumers.
 #[derive(Clone, Debug)]
@@ -41,6 +29,47 @@ pub enum ConsumerMessage {
     ServerClosedConnection(ErrorKind),
 }
 
+/// A message consumer associated with an AMQP queue.
+///
+/// # Example
+///
+/// ```rust
+/// use amiquip::{Consumer, ConsumerMessage, Result};
+/// # use amiquip::Delivery;
+///
+/// # fn handle_delivery(_: Delivery) {}
+/// // Receive (at least) n messages on the consumer, then cancel it.
+/// fn consume_n_messages(consumer: Consumer, n: usize) -> Result<()> {
+///     for (i, message) in consumer.receiver().iter().enumerate() {
+///         match message {
+///             ConsumerMessage::Delivery(delivery) => handle_delivery(delivery),
+///             ConsumerMessage::ServerClosedChannel(err)
+///             | ConsumerMessage::ServerClosedConnection(err) => return Err(err)?,
+///             ConsumerMessage::ClientCancelled
+///             | ConsumerMessage::ServerCancelled
+///             | ConsumerMessage::ClientClosedChannel
+///             | ConsumerMessage::ClientClosedConnection => break,
+///         }
+///         if i >= n {
+///             consumer.cancel()?;
+///         }
+///     }
+///     Ok(())
+/// }
+/// ```
+pub struct Consumer<'a> {
+    channel: &'a Channel,
+    consumer_tag: String,
+    rx: Receiver<ConsumerMessage>,
+    cancelled: Cell<bool>,
+}
+
+impl Drop for Consumer<'_> {
+    fn drop(&mut self) {
+        let _ = self.cancel();
+    }
+}
+
 impl Consumer<'_> {
     pub(crate) fn new(
         channel: &Channel,
@@ -51,38 +80,69 @@ impl Consumer<'_> {
             channel,
             consumer_tag,
             rx,
-            cancelled: false,
+            cancelled: Cell::new(false),
         }
     }
 
+    /// The server-assigned consumer tag.
     #[inline]
     pub fn consumer_tag(&self) -> &str {
         &self.consumer_tag
     }
 
+    /// The `crossbeam_channel::Receiver` on which messages will be delivered. Once a consumer
+    /// message of any variant other than
+    /// [`ConsumerMessage`](enum.ConsumerMessage.html#variant.Delivery) has been received, no more
+    /// messages will be sent and the sending side of the channel (held by the connection's I/O
+    /// thread) will be dropped.
+    ///
+    /// # Note on Cloning
+    ///
+    /// Crossbeam channels implement `Clone`. Be careful cloning this receiver, as the sending side
+    /// (held by the connection's I/O thread) will be dropped when `self` is cancelled, which will
+    /// happen when [`cancel`](#method.cancel) is called or `self` is dropped.
     #[inline]
     pub fn receiver(&self) -> &Receiver<ConsumerMessage> {
         &self.rx
     }
 
-    pub fn cancel(&mut self) -> Result<()> {
-        if self.cancelled {
+    /// Cancel this consumer.
+    ///
+    /// When the cancellation is acknowledged by the server, the channel returned by
+    /// [`receiver`](#method.receiver) will receive a
+    /// [`ConsumerMessage::ClientCancelled`](enum.ConsumerMessage.html#variant.ClientCancelled)
+    /// message. This method does not consume `self` because this method is inherently racy; the
+    /// server may be sending us additional messages as we are attempting to cancel.
+    ///
+    /// Calling this method a second or later time will always return `Ok`; if you care about
+    /// cancellation errors, you must capture the `Err` value on the first call.
+    pub fn cancel(&self) -> Result<()> {
+        if self.cancelled.get() {
             return Ok(());
         }
-        self.cancelled = true;
+        self.cancelled.set(true);
         self.channel.basic_cancel(&self)
     }
 
+    /// Calls [`Delivery::ack`](struct.Delivery.html#method.ack) on `delivery` using the channel
+    /// that contains this consumer. See the note on that method about taking care not to ack
+    /// deliveries across channels.
     #[inline]
     pub fn ack(&self, delivery: Delivery, multiple: bool) -> Result<()> {
         self.channel.basic_ack(delivery, multiple)
     }
 
+    /// Calls [`Delivery::nack`](struct.Delivery.html#method.nack) on `delivery` using the channel
+    /// that contains this consumer. See the note on that method about taking care not to nack
+    /// deliveries across channels.
     #[inline]
     pub fn nack(&self, delivery: Delivery, multiple: bool, requeue: bool) -> Result<()> {
         self.channel.basic_nack(delivery, multiple, requeue)
     }
 
+    /// Calls [`Delivery::reject`](struct.Delivery.html#method.reject) on `delivery` using the
+    /// channel that contains this consumer. See the note on that method about taking care not to
+    /// reject deliveries across channels.
     #[inline]
     pub fn reject(&self, delivery: Delivery, requeue: bool) -> Result<()> {
         self.channel.basic_reject(delivery, requeue)
