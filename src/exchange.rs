@@ -79,6 +79,7 @@ impl ExchangeDeclareOptions {
     }
 }
 
+/// Handle for a declared AMQP exchange.
 pub struct Exchange<'a> {
     channel: &'a Channel,
     name: String,
@@ -89,15 +90,31 @@ impl Exchange<'_> {
         Exchange { channel, name }
     }
 
+    /// Construct a handle for the direct exchange on the given `channel`. This is an entirely
+    /// local operation; the default exchange (named `""`) is guaranteed to exist and does not need
+    /// to be declared.
     pub fn direct(channel: &Channel) -> Exchange {
         let name = "".to_string();
         Exchange { channel, name }
     }
 
+    /// Name of this exchange.
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Publish a message to this exchange using the given routing key and properties.
+    ///
+    /// `mandatory` instructs the server what to do if this message cannot be routed to a queue. If
+    /// `mandatory` is true, the message will be returned to us; use
+    /// [`Channel::listen_for_returns`](struct.Channel.html#method.listen_for_returns) to receive
+    /// returned message. If `mandatory` is false, the message will be silently discarded.
+    ///
+    /// `immediate` instructs the server what to do if this message cannot be routed to a consumer
+    /// in a queue immediately. If `immediate` is true, the message will be returned to us; use
+    /// [`Channel::listen_for_returns`](struct.Channel.html#method.listen_for_returns) to receive
+    /// returned message. If `immediate` is false, the message will be queued for future
+    /// consumption.
     pub fn publish<T: AsRef<[u8]>, S: Into<String>>(
         &self,
         content: T,
@@ -116,90 +133,136 @@ impl Exchange<'_> {
         )
     }
 
+    /// Synchronously bind this exchange (as destination) to the `source` exchange with the given
+    /// routing key and arguments. Exchange-to-exchange binding is a RabbitMQ extension; you can
+    /// examine the connection's [server
+    /// properties](struct.Connection.html#method.server_properties) to see if the current
+    /// connection supports this feature.
     pub fn bind_to_source<S: Into<String>>(
         &self,
-        other: &Exchange,
+        source: &Exchange,
         routing_key: S,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_bind(self.name(), other.name(), routing_key, arguments)
+            .exchange_bind(self.name(), source.name(), routing_key, arguments)
     }
 
+    /// Asynchronously bind this exchange (as destination) to the `source` exchange with the given
+    /// routing key and arguments. Exchange-to-exchange binding is a RabbitMQ extension; you can
+    /// examine the connection's [server
+    /// properties](struct.Connection.html#method.server_properties) to see if the current
+    /// connection supports this feature.
     pub fn bind_to_source_nowait<S: Into<String>>(
         &self,
-        other: &Exchange,
+        source: &Exchange,
         routing_key: S,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_bind_nowait(self.name(), other.name(), routing_key, arguments)
+            .exchange_bind_nowait(self.name(), source.name(), routing_key, arguments)
     }
 
+    /// Synchronously bind this exchange (as source) to the `destination` exchange with the given
+    /// routing key and arguments. Exchange-to-exchange binding is a RabbitMQ extension; you can
+    /// examine the connection's [server
+    /// properties](struct.Connection.html#method.server_properties) to see if the current
+    /// connection supports this feature.
     pub fn bind_to_destination<S: Into<String>>(
         &self,
-        other: &Exchange,
+        destination: &Exchange,
         routing_key: S,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_bind(other.name(), self.name(), routing_key, arguments)
+            .exchange_bind(destination.name(), self.name(), routing_key, arguments)
     }
 
+    /// Asynchronously bind this exchange (as source) to the `destination` exchange with the given
+    /// routing key and arguments. Exchange-to-exchange binding is a RabbitMQ extension; you can
+    /// examine the connection's [server
+    /// properties](struct.Connection.html#method.server_properties) to see if the current
+    /// connection supports this feature.
     pub fn bind_to_destination_nowait<S: Into<String>>(
         &self,
-        other: &Exchange,
+        destination: &Exchange,
         routing_key: S,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_bind_nowait(other.name(), self.name(), routing_key, arguments)
+            .exchange_bind_nowait(destination.name(), self.name(), routing_key, arguments)
     }
 
+    /// Synchronously unbind this exchange (as destination) from the `source` exchange with the
+    /// given routing key and arguments. Exchange-to-exchange binding is a RabbitMQ extension; you
+    /// can examine the connection's [server
+    /// properties](struct.Connection.html#method.server_properties) to see if the current
+    /// connection supports this feature.
     pub fn unbind_from_source<S: Into<String>>(
         &self,
-        other: &Exchange,
+        source: &Exchange,
         routing_key: S,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_unbind(self.name(), other.name(), routing_key, arguments)
+            .exchange_unbind(self.name(), source.name(), routing_key, arguments)
     }
 
+    /// Asynchronously unbind this exchange (as destination) from the `source` exchange with the
+    /// given routing key and arguments. Exchange-to-exchange binding is a RabbitMQ extension; you
+    /// can examine the connection's [server
+    /// properties](struct.Connection.html#method.server_properties) to see if the current
+    /// connection supports this feature.
     pub fn unbind_from_source_nowait<S: Into<String>>(
         &self,
-        other: &Exchange,
+        source: &Exchange,
         routing_key: S,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_unbind_nowait(self.name(), other.name(), routing_key, arguments)
+            .exchange_unbind_nowait(self.name(), source.name(), routing_key, arguments)
     }
 
+    /// Synchronously unbind this exchange (as source) from the `destination` exchange with the
+    /// given routing key and arguments. Exchange-to-exchange binding is a RabbitMQ extension; you
+    /// can examine the connection's [server
+    /// properties](struct.Connection.html#method.server_properties) to see if the current
+    /// connection supports this feature.
     pub fn unbind_from_destination<S: Into<String>>(
         &self,
-        other: &Exchange,
+        destination: &Exchange,
         routing_key: S,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_unbind(other.name(), self.name(), routing_key, arguments)
+            .exchange_unbind(destination.name(), self.name(), routing_key, arguments)
     }
 
+    /// Asynchronously unbind this exchange (as source) from the `destination` exchange with the
+    /// given routing key and arguments. Exchange-to-exchange binding is a RabbitMQ extension; you
+    /// can examine the connection's [server
+    /// properties](struct.Connection.html#method.server_properties) to see if the current
+    /// connection supports this feature.
     pub fn unbind_from_destination_nowait<S: Into<String>>(
         &self,
-        other: &Exchange,
+        destination: &Exchange,
         routing_key: S,
         arguments: FieldTable,
     ) -> Result<()> {
         self.channel
-            .exchange_unbind_nowait(other.name(), self.name(), routing_key, arguments)
+            .exchange_unbind_nowait(destination.name(), self.name(), routing_key, arguments)
     }
 
+    /// Synchronously delete this exchange. If `if_unused` is true, the exchange will only be
+    /// deleted if it has no queue bindings; if `if_unused` is true and the exchange still has
+    /// queue bindings, the server will close this channel.
     pub fn delete(self, if_unused: bool) -> Result<()> {
         self.channel.exchange_delete(self.name(), if_unused)
     }
 
+    /// Asynchronously delete this exchange. If `if_unused` is true, the exchange will only be
+    /// deleted if it has no queue bindings; if `if_unused` is true and the exchange still has
+    /// queue bindings, the server will close this channel.
     pub fn delete_nowait(self, if_unused: bool) -> Result<()> {
         self.channel.exchange_delete_nowait(self.name(), if_unused)
     }
