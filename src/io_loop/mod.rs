@@ -316,12 +316,26 @@ impl IoLoop {
         options: ConnectionOptions<Auth>,
     ) -> Result<(TuneOk, FieldTable)> {
         let mut state = HandshakeState::Start(options);
-        self.run_io_loop(
+        let result = self.run_io_loop(
             stream,
             &mut state,
             Self::handle_handshake_event,
             Self::is_handshake_done,
-        )?;
+        );
+        match result {
+            Ok(()) => (),
+            Err(err) => {
+                // If our credentials are bad, the socket is dropped without a message,
+                // but we can detect that if we had gotten up to the Secure state before
+                // failing.
+                return match state {
+                    HandshakeState::Secure(_, _) => {
+                        Err(err).context(ErrorKind::InvalidCredentials)?
+                    }
+                    _ => Err(err),
+                };
+            }
+        }
         self.connection_timeout = None;
         match state {
             HandshakeState::Start(_)
