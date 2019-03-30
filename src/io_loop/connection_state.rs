@@ -204,15 +204,21 @@ impl ConnectionState {
             }
             // Server ack for client-initiated channel close.
             AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::CloseOk(close_ok))) => {
-                let mut slot = slot_remove(inner, n)?;
-                send(
-                    &slot.tx,
-                    Ok(ChannelMessage::Method(AMQPClass::Channel(
-                        AmqpChannel::CloseOk(close_ok),
-                    ))),
-                )?;
-                for (_, tx) in slot.consumers.drain() {
-                    send(&tx, ConsumerMessage::ClientClosedChannel)?;
+                // Closing is inherently racy; if we and the server both send a Close at
+                // the same time, we might see the server Close and then get a CloseOk, but
+                // we will have removed the slot when we got the close. It is therefore not
+                // an error to get a CloseOk for a nonexistent slot, since the server is
+                // confirming that a channel is gone (and we don't have it anymore anyway).
+                if let Ok(mut slot) = slot_remove(inner, n) {
+                    send(
+                        &slot.tx,
+                        Ok(ChannelMessage::Method(AMQPClass::Channel(
+                            AmqpChannel::CloseOk(close_ok),
+                        ))),
+                    )?;
+                    for (_, tx) in slot.consumers.drain() {
+                        send(&tx, ConsumerMessage::ClientClosedChannel)?;
+                    }
                 }
             }
             // Server ack for consume request.
