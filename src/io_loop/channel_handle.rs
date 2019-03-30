@@ -92,7 +92,7 @@ impl ChannelHandle {
     }
 
     #[inline]
-    fn channel_id(&self) -> u16 {
+    pub(crate) fn channel_id(&self) -> u16 {
         self.handle.channel_id()
     }
 

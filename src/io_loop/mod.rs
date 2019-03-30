@@ -84,7 +84,7 @@ impl ChannelSlot {
         let channel_slot = ChannelSlot {
             rx: mio_rx,
             tx,
-            collector: ContentCollector::new(),
+            collector: ContentCollector::new(channel_id),
             consumers: HashMap::new(),
             return_handler: None,
         };

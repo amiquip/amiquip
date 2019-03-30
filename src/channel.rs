@@ -68,6 +68,10 @@ impl Channel {
         self.inner.borrow_mut().close()
     }
 
+    pub fn channel_id(&self) -> u16 {
+        self.inner.borrow().channel_id()
+    }
+
     fn call<M: IntoAmqpClass + Debug, T: TryFromAmqpClass>(&self, method: M) -> Result<T> {
         self.inner.borrow_mut().call(method)
     }

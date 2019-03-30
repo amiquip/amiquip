@@ -5,6 +5,7 @@ use amq_protocol::protocol::basic::GetOk as AmqpGetOk;
 use amq_protocol::protocol::basic::Return as AmqpReturn;
 
 pub(super) struct ContentCollector {
+    channel_id: u16,
     kind: Option<Kind>,
 }
 
@@ -15,8 +16,11 @@ pub(super) enum CollectorResult {
 }
 
 impl ContentCollector {
-    pub(super) fn new() -> ContentCollector {
-        ContentCollector { kind: None }
+    pub(super) fn new(channel_id: u16) -> ContentCollector {
+        ContentCollector {
+            channel_id,
+            kind: None,
+        }
     }
 
     pub(super) fn collect_deliver(&mut self, deliver: Deliver) -> Result<()> {
@@ -54,7 +58,7 @@ impl ContentCollector {
         header: AMQPContentHeader,
     ) -> Result<Option<CollectorResult>> {
         match self.kind.take() {
-            Some(Kind::Delivery(state)) => match state.collect_header(header)? {
+            Some(Kind::Delivery(state)) => match state.collect_header(self.channel_id, header)? {
                 Content::Done((tag, delivery)) => {
                     self.kind = None;
                     Ok(Some(CollectorResult::Delivery((tag, delivery))))
@@ -64,7 +68,7 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
-            Some(Kind::Return(state)) => match state.collect_header(header)? {
+            Some(Kind::Return(state)) => match state.collect_header(self.channel_id, header)? {
                 Content::Done(return_) => {
                     self.kind = None;
                     Ok(Some(CollectorResult::Return(return_)))
@@ -74,7 +78,7 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
-            Some(Kind::Get(state)) => match state.collect_header(header)? {
+            Some(Kind::Get(state)) => match state.collect_header(self.channel_id, header)? {
                 Content::Done(get) => {
                     self.kind = None;
                     Ok(Some(CollectorResult::Get(get)))
@@ -90,7 +94,7 @@ impl ContentCollector {
 
     pub(super) fn collect_body(&mut self, body: Vec<u8>) -> Result<Option<CollectorResult>> {
         match self.kind.take() {
-            Some(Kind::Delivery(state)) => match state.collect_body(body)? {
+            Some(Kind::Delivery(state)) => match state.collect_body(self.channel_id, body)? {
                 Content::Done((tag, delivery)) => {
                     self.kind = None;
                     Ok(Some(CollectorResult::Delivery((tag, delivery))))
@@ -100,7 +104,7 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
-            Some(Kind::Return(state)) => match state.collect_body(body)? {
+            Some(Kind::Return(state)) => match state.collect_body(self.channel_id, body)? {
                 Content::Done(return_) => {
                     self.kind = None;
                     Ok(Some(CollectorResult::Return(return_)))
@@ -110,7 +114,7 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
-            Some(Kind::Get(state)) => match state.collect_body(body)? {
+            Some(Kind::Get(state)) => match state.collect_body(self.channel_id, body)? {
                 Content::Done(get) => {
                     self.kind = None;
                     Ok(Some(CollectorResult::Get(get)))
@@ -135,15 +139,25 @@ trait ContentType {
     type Start;
     type Finish;
 
-    fn new(start: Self::Start, buf: Vec<u8>, properties: AmqpProperties) -> Self::Finish;
+    fn new(
+        channel_id: u16,
+        start: Self::Start,
+        buf: Vec<u8>,
+        properties: AmqpProperties,
+    ) -> Self::Finish;
 }
 
 impl ContentType for Delivery {
     type Start = Deliver;
     type Finish = (String, Delivery);
 
-    fn new(start: Self::Start, buf: Vec<u8>, properties: AmqpProperties) -> Self::Finish {
-        Delivery::new(start, buf, properties)
+    fn new(
+        channel_id: u16,
+        start: Self::Start,
+        buf: Vec<u8>,
+        properties: AmqpProperties,
+    ) -> Self::Finish {
+        Delivery::new(channel_id, start, buf, properties)
     }
 }
 
@@ -151,7 +165,12 @@ impl ContentType for Return {
     type Start = AmqpReturn;
     type Finish = Return;
 
-    fn new(start: Self::Start, buf: Vec<u8>, properties: AmqpProperties) -> Self::Finish {
+    fn new(
+        _channel_id: u16,
+        start: Self::Start,
+        buf: Vec<u8>,
+        properties: AmqpProperties,
+    ) -> Self::Finish {
         Return::new(start, buf, properties)
     }
 }
@@ -160,9 +179,14 @@ impl ContentType for Get {
     type Start = AmqpGetOk;
     type Finish = Get;
 
-    fn new(get_ok: AmqpGetOk, buf: Vec<u8>, properties: AmqpProperties) -> Self::Finish {
+    fn new(
+        channel_id: u16,
+        get_ok: AmqpGetOk,
+        buf: Vec<u8>,
+        properties: AmqpProperties,
+    ) -> Self::Finish {
         let message_count = get_ok.message_count;
-        let delivery = Delivery::new_get_ok(get_ok, buf, properties);
+        let delivery = Delivery::new_get_ok(channel_id, get_ok, buf, properties);
         Get {
             delivery,
             message_count,
@@ -181,11 +205,16 @@ enum State<T: ContentType> {
 }
 
 impl<T: ContentType> State<T> {
-    fn collect_header(self, header: AMQPContentHeader) -> Result<Content<T>> {
+    fn collect_header(self, channel_id: u16, header: AMQPContentHeader) -> Result<Content<T>> {
         match self {
             State::Start(start) => {
                 if header.body_size == 0 {
-                    Ok(Content::Done(T::new(start, Vec::new(), header.properties)))
+                    Ok(Content::Done(T::new(
+                        channel_id,
+                        start,
+                        Vec::new(),
+                        header.properties,
+                    )))
                 } else {
                     let buf = Vec::with_capacity(header.body_size as usize);
                     Ok(Content::NeedMore(State::Body(start, header, buf)))
@@ -195,13 +224,18 @@ impl<T: ContentType> State<T> {
         }
     }
 
-    fn collect_body(self, mut body: Vec<u8>) -> Result<Content<T>> {
+    fn collect_body(self, channel_id: u16, mut body: Vec<u8>) -> Result<Content<T>> {
         match self {
             State::Body(start, header, mut buf) => {
                 let body_size = header.body_size as usize;
                 buf.append(&mut body);
                 if buf.len() == body_size {
-                    Ok(Content::Done(T::new(start, buf, header.properties)))
+                    Ok(Content::Done(T::new(
+                        channel_id,
+                        start,
+                        buf,
+                        header.properties,
+                    )))
                 } else if buf.len() < body_size {
                     Ok(Content::NeedMore(State::Body(start, header, buf)))
                 } else {
