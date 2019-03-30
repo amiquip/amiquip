@@ -80,17 +80,58 @@ impl Delivery {
     /// the channel they were received on; the result of failing to do this is unspecified by the
     /// AMQP specification.
     #[inline]
-    pub fn ack(self, channel: &Channel, multiple: bool) -> Result<()> {
+    pub fn ack(self, channel: &Channel) -> Result<()> {
         assert_eq!(
             self.channel_id,
             channel.channel_id(),
             "cannot ack delivery on different channel"
         );
-        channel.basic_ack(self, multiple)
+        channel.basic_ack(self, false)
     }
 
-    /// Reject this delivery, which must have been received on the given channel. If `multiple` is
-    /// true, rejects this delivery and all other deliveries received on this channel with smaller
+    /// Acknowledge this delivery, which must have been received on the given channel, and all
+    /// other deliveries received on this channel with smaller
+    /// [`delivery_tag`](#method.delivery_tag)s.
+    ///
+    /// # Panics
+    ///
+    /// This method will attempt to panic if `channel` does not match the channel this delivery was
+    /// received on. It does this by comparing channel IDs, so it is possible that an incorrect
+    /// `Delivery`/`Channel` pairing will not be detected at runtime. Always ack deliveries with
+    /// the channel they were received on; the result of failing to do this is unspecified by the
+    /// AMQP specification.
+    #[inline]
+    pub fn ack_multiple(self, channel: &Channel) -> Result<()> {
+        assert_eq!(
+            self.channel_id,
+            channel.channel_id(),
+            "cannot ack delivery on different channel"
+        );
+        channel.basic_ack(self, true)
+    }
+
+    /// Reject this delivery, which must have been received on the given channel. If `requeue` is
+    /// true, instructs the server to attempt to requeue the message.
+    ///
+    /// # Panics
+    ///
+    /// This method will attempt to panic if `channel` does not match the channel this delivery was
+    /// received on. It does this by comparing channel IDs, so it is possible that an incorrect
+    /// `Delivery`/`Channel` pairing will not be detected at runtime. Always ack deliveries with
+    /// the channel they were received on; the result of failing to do this is unspecified by the
+    /// AMQP specification.
+    #[inline]
+    pub fn nack(self, channel: &Channel, requeue: bool) -> Result<()> {
+        assert_eq!(
+            self.channel_id,
+            channel.channel_id(),
+            "cannot nack delivery on different channel"
+        );
+        channel.basic_nack(self, false, requeue)
+    }
+
+    /// Reject this delivery, which must have been received on the given channel, and all other
+    /// unacknowledged deliveries to this channel with smaller
     /// [`delivery_tag`](#method.delivery_tag)s. If `requeue` is true, instructs the server to
     /// attempt to requeue the message.
     ///
@@ -102,13 +143,13 @@ impl Delivery {
     /// the channel they were received on; the result of failing to do this is unspecified by the
     /// AMQP specification.
     #[inline]
-    pub fn nack(self, channel: &Channel, multiple: bool, requeue: bool) -> Result<()> {
+    pub fn nack_multiple(self, channel: &Channel, requeue: bool) -> Result<()> {
         assert_eq!(
             self.channel_id,
             channel.channel_id(),
             "cannot nack delivery on different channel"
         );
-        channel.basic_nack(self, multiple, requeue)
+        channel.basic_nack(self, true, requeue)
     }
 
     /// Reject this delivery, which must have been received on the given channel. If `requeue` is

@@ -152,16 +152,32 @@ impl Consumer<'_> {
     /// that contains this consumer. See the note on that method about taking care not to ack
     /// deliveries across channels.
     #[inline]
-    pub fn ack(&self, delivery: Delivery, multiple: bool) -> Result<()> {
-        self.channel.basic_ack(delivery, multiple)
+    pub fn ack(&self, delivery: Delivery) -> Result<()> {
+        delivery.ack(self.channel)
+    }
+
+    /// Calls [`Delivery::ack_multiple`](struct.Delivery.html#method.ack_multiple) on `delivery`
+    /// using the channel that contains this consumer. See the note on that method about taking
+    /// care not to ack deliveries across channels.
+    #[inline]
+    pub fn ack_multiple(&self, delivery: Delivery) -> Result<()> {
+        delivery.ack_multiple(self.channel)
     }
 
     /// Calls [`Delivery::nack`](struct.Delivery.html#method.nack) on `delivery` using the channel
     /// that contains this consumer. See the note on that method about taking care not to nack
     /// deliveries across channels.
     #[inline]
-    pub fn nack(&self, delivery: Delivery, multiple: bool, requeue: bool) -> Result<()> {
-        self.channel.basic_nack(delivery, multiple, requeue)
+    pub fn nack(&self, delivery: Delivery, requeue: bool) -> Result<()> {
+        delivery.nack(self.channel, requeue)
+    }
+
+    /// Calls [`Delivery::nack_multiple`](struct.Delivery.html#method.nack_multiple) on `delivery`
+    /// using the channel that contains this consumer. See the note on that method about taking
+    /// care not to nack deliveries across channels.
+    #[inline]
+    pub fn nack_multiple(&self, delivery: Delivery, requeue: bool) -> Result<()> {
+        delivery.nack_multiple(self.channel, requeue)
     }
 
     /// Calls [`Delivery::reject`](struct.Delivery.html#method.reject) on `delivery` using the

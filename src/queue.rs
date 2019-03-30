@@ -1,4 +1,4 @@
-use crate::{Channel, Consumer, ConsumerOptions, Delivery, Exchange, FieldTable, Get, Result};
+use crate::{Channel, Consumer, ConsumerOptions, Exchange, FieldTable, Get, Result};
 use amq_protocol::protocol::queue::{Declare, Delete};
 
 /// Options passed to the server when declaring a queue.
@@ -203,29 +203,5 @@ impl Queue<'_> {
     #[inline]
     pub fn delete_nowait(self, options: QueueDeleteOptions) -> Result<()> {
         self.channel.queue_delete_nowait(self.name(), options)
-    }
-
-    /// Calls [`Delivery::ack`](struct.Delivery.html#method.ack) on `delivery` using the channel
-    /// that contains this queue. See the note on that method about taking care not to ack
-    /// deliveries across channels.
-    #[inline]
-    pub fn ack(&self, delivery: Delivery, multiple: bool) -> Result<()> {
-        self.channel.basic_ack(delivery, multiple)
-    }
-
-    /// Calls [`Delivery::nack`](struct.Delivery.html#method.nack) on `delivery` using the channel
-    /// that contains this queue. See the note on that method about taking care not to nack
-    /// deliveries across channels.
-    #[inline]
-    pub fn nack(&self, delivery: Delivery, multiple: bool, requeue: bool) -> Result<()> {
-        self.channel.basic_nack(delivery, multiple, requeue)
-    }
-
-    /// Calls [`Delivery::reject`](struct.Delivery.html#method.reject) on `delivery` using the
-    /// channel that contains this queue. See the note on that method about taking care not to
-    /// reject deliveries across channels.
-    #[inline]
-    pub fn reject(&self, delivery: Delivery, requeue: bool) -> Result<()> {
-        self.channel.basic_reject(delivery, requeue)
     }
 }
