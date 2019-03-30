@@ -2,13 +2,13 @@ use crate::io_loop::ChannelHandle;
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
 use crate::{
     Consumer, ConsumerOptions, Delivery, Exchange, ExchangeDeclareOptions, ExchangeType, Get,
-    Queue, QueueDeclareOptions, QueueDeleteOptions, Result, Return,
+    Publish, Queue, QueueDeclareOptions, QueueDeleteOptions, Result, Return,
 };
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Get as AmqpGet;
+use amq_protocol::protocol::basic::Publish as AmqpPublish;
 use amq_protocol::protocol::basic::{
-    AMQPProperties, Ack, Cancel, CancelOk, Consume, Nack, Publish, Qos, QosOk, Recover, RecoverOk,
-    Reject,
+    Ack, Cancel, CancelOk, Consume, Nack, Qos, QosOk, Recover, RecoverOk, Reject,
 };
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::exchange::Bind as ExchangeBind;
@@ -156,42 +156,23 @@ impl Channel {
             .map(|_recover_ok| ())
     }
 
-    /// Publish a message to `exchange` with the routing key `routing_key`. If the exchange does
-    /// not exist, the server will close this channel. Consider using one of the
-    /// [`exchange_declare`](#method.exchange_declare) methods and then
-    /// [`Exchange::publish`](struct.Exchange.html#method.publish) to avoid this.
-    ///
-    /// `mandatory` instructs the server what to do if this message cannot be routed to a queue. If
-    /// `mandatory` is true, the message will be returned to us; use
-    /// [`listen_for_returns`](#method.listen_for_returns) to receive returned message. If
-    /// `mandatory` is false, the message will be silently discarded.
-    ///
-    /// `immediate` instructs the server what to do if this message cannot be routed to a consumer
-    /// in a queue immediately. If `immediate` is true, the message will be returned to us; use
-    /// [`listen_for_returns`](#method.listen_for_returns) to receive returned message. If
-    /// `immediate` is false, the message will be queued for future consumption.
-    ///
-    /// If either `mandatory` or `immediate` are true and there is no active return listener from
-    /// [`listen_for_returns`](#method.listen_for_returns), any returned messages will be
-    /// discarded.
-    pub fn basic_publish<T: AsRef<[u8]>, S0: Into<String>, S1: Into<String>>(
-        &self,
-        content: T,
-        exchange: S0,
-        routing_key: S1,
-        mandatory: bool,
-        immediate: bool,
-        properties: &AMQPProperties,
-    ) -> Result<()> {
+    /// Publish a message to `exchange`. If the exchange does not exist, the server will close this
+    /// channel. Consider using one of the [`exchange_declare`](#method.exchange_declare) methods
+    /// and then [`Exchange::publish`](struct.Exchange.html#method.publish) to avoid this.
+    pub fn basic_publish<S: Into<String>>(&self, exchange: S, publish: Publish) -> Result<()> {
         let mut inner = self.inner.borrow_mut();
-        inner.call_nowait(AmqpBasic::Publish(Publish {
+        inner.call_nowait(AmqpBasic::Publish(AmqpPublish {
             ticket: 0,
             exchange: exchange.into(),
-            routing_key: routing_key.into(),
-            mandatory,
-            immediate,
+            routing_key: publish.routing_key,
+            mandatory: publish.mandatory,
+            immediate: publish.mandatory,
         }))?;
-        inner.send_content(content.as_ref(), Publish::get_class_id(), properties)
+        inner.send_content(
+            publish.body,
+            AmqpPublish::get_class_id(),
+            &publish.properties,
+        )
     }
 
     /// Open a crossbeam channel to receive returned messages from the server (i.e., messages

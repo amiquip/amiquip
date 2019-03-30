@@ -79,6 +79,56 @@ impl ExchangeDeclareOptions {
     }
 }
 
+/// Wrapper for a message to be published.
+pub struct Publish<'a> {
+    /// Body of content to send.
+    pub body: &'a [u8],
+
+    /// Routing key.
+    pub routing_key: String,
+
+    /// If true, return this message to us if it cannot be routed to a queue. See
+    /// [`Channel::listen_for_returns`](struct.Channel.html) for receiving returned messages.
+    pub mandatory: bool,
+
+    /// If true, return this message to us if it cannot immediately be routed to a consumer. See
+    /// [`Channel::listen_for_returns`](struct.Channel.html) for receiving returned messages.
+    pub immediate: bool,
+
+    /// Other properties of the message (e.g., headers).
+    pub properties: AmqpProperties,
+}
+
+impl<'a> Publish<'a> {
+    /// Helper to create a message with the given body and routing key; `mandatory` and
+    /// `immediate` will be set to false, and `properties` will be empty.
+    pub fn new<S: Into<String>>(body: &[u8], routing_key: S) -> Publish {
+        Publish {
+            body,
+            routing_key: routing_key.into(),
+            mandatory: false,
+            immediate: false,
+            properties: AmqpProperties::default(),
+        }
+    }
+
+    /// Helper to create a message with the given body, routing key, and properties; `mandatory`
+    /// and `immediate` will be set to false.
+    pub fn with_properties<S: Into<String>>(
+        body: &[u8],
+        routing_key: S,
+        properties: AmqpProperties,
+    ) -> Publish {
+        Publish {
+            body,
+            routing_key: routing_key.into(),
+            mandatory: false,
+            immediate: false,
+            properties,
+        }
+    }
+}
+
 /// Handle for a declared AMQP exchange.
 pub struct Exchange<'a> {
     channel: &'a Channel,
@@ -103,34 +153,9 @@ impl Exchange<'_> {
         &self.name
     }
 
-    /// Publish a message to this exchange using the given routing key and properties.
-    ///
-    /// `mandatory` instructs the server what to do if this message cannot be routed to a queue. If
-    /// `mandatory` is true, the message will be returned to us; use
-    /// [`Channel::listen_for_returns`](struct.Channel.html#method.listen_for_returns) to receive
-    /// returned message. If `mandatory` is false, the message will be silently discarded.
-    ///
-    /// `immediate` instructs the server what to do if this message cannot be routed to a consumer
-    /// in a queue immediately. If `immediate` is true, the message will be returned to us; use
-    /// [`Channel::listen_for_returns`](struct.Channel.html#method.listen_for_returns) to receive
-    /// returned message. If `immediate` is false, the message will be queued for future
-    /// consumption.
-    pub fn publish<T: AsRef<[u8]>, S: Into<String>>(
-        &self,
-        content: T,
-        routing_key: S,
-        mandatory: bool,
-        immediate: bool,
-        properties: &AmqpProperties,
-    ) -> Result<()> {
-        self.channel.basic_publish(
-            content,
-            self.name(),
-            routing_key,
-            mandatory,
-            immediate,
-            properties,
-        )
+    /// Publish a message to this exchange.
+    pub fn publish(&self, publish: Publish) -> Result<()> {
+        self.channel.basic_publish(self.name(), publish)
     }
 
     /// Synchronously bind this exchange (as destination) to the `source` exchange with the given

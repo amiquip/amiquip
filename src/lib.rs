@@ -22,7 +22,7 @@ pub use connection_options::ConnectionOptions;
 pub use consumer::{Consumer, ConsumerMessage, ConsumerOptions};
 pub use delivery::Delivery;
 pub use errors::{Error, ErrorKind, Result};
-pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeType};
+pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeType, Publish};
 pub use get::Get;
 pub use queue::{Queue, QueueDeclareOptions, QueueDeleteOptions};
 pub use return_::Return;
