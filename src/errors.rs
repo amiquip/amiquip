@@ -1,6 +1,8 @@
 use failure::{Backtrace, Context, Fail};
 use std::sync::Arc;
 use std::{fmt, result};
+use url::ParseError as UrlParseError;
+use url::Url;
 
 /// A type alias for handling errors throughout amiquip.
 pub type Result<T> = result::Result<T, Error>;
@@ -36,6 +38,19 @@ impl fmt::Display for Error {
 /// Specific error cases returned by amiquip.
 #[derive(Clone, Debug, PartialEq, Fail)]
 pub enum ErrorKind {
+    /// URL parsing failed.
+    #[fail(display = "could not parse url: {}", _0)]
+    UrlParseError(UrlParseError),
+
+    /// A TLS connection was requested (e.g., via URL), but the amiquip was built without TLS
+    /// support.
+    #[fail(display = "amiquip built without TLS support")]
+    TlsFeatureNotEnabled,
+
+    /// URL could not be decoded into an AMQP or AMQPS connection string.
+    #[fail(display = "invalid url: {}", _0)]
+    InvalidUrl(Url),
+
     /// The underlying socket was closed.
     #[fail(display = "underlying socket closed unexpectedly")]
     UnexpectedSocketClose,
@@ -52,6 +67,11 @@ pub enum ErrorKind {
     #[cfg(feature = "native-tls")]
     #[fail(display = "TLS handshake failed")]
     TlsHandshake,
+
+    /// Error from underlying TLS implementation.
+    #[cfg(feature = "native-tls")]
+    #[fail(display = "TLS error: {}", _0)]
+    TlsError(String),
 
     /// The server does not support the requested auth mechanism.
     #[fail(display = "requested auth mechanism unavailable (available = {})", _0)]
@@ -157,6 +177,12 @@ pub enum ErrorKind {
     #[doc(hidden)]
     #[fail(display = "invalid error case")]
     __Nonexhaustive,
+}
+
+impl From<UrlParseError> for Error {
+    fn from(err: UrlParseError) -> Error {
+        Error::from(ErrorKind::UrlParseError(err))
+    }
 }
 
 impl From<ErrorKind> for Error {

@@ -17,7 +17,7 @@ pub trait Sasl: Default + Clone + Send + 'static {
 ///
 /// The [`default`](#impl-Default) implementation creates an [`Auth::Plain`](#variant.Plain)
 /// variant with the username and password both set to `guest`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Auth {
     /// PLAIN authentication via a username and passwords.
     Plain { username: String, password: String },

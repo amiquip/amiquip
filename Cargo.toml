@@ -18,6 +18,7 @@ mio-extras = "2.0"
 cookie-factory = "0.2"
 crossbeam-channel = "0.3"
 indexmap = "1.0"
+url = "1.7"
 native-tls = { version = "*", optional = true }
 
 # only for test binary - remove later

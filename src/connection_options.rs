@@ -21,7 +21,7 @@ use std::time::Duration;
 ///     .heartbeat(60)
 /// # }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ConnectionOptions<Auth: Sasl> {
     pub(crate) auth: Auth,
     pub(crate) virtual_host: String,
