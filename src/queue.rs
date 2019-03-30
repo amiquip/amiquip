@@ -174,17 +174,17 @@ impl Queue<'_> {
     }
 
     #[inline]
-    pub fn ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
+    pub fn ack(&self, delivery: Delivery, multiple: bool) -> Result<()> {
         self.channel.basic_ack(delivery, multiple)
     }
 
     #[inline]
-    pub fn nack(&self, delivery: &Delivery, multiple: bool, requeue: bool) -> Result<()> {
+    pub fn nack(&self, delivery: Delivery, multiple: bool, requeue: bool) -> Result<()> {
         self.channel.basic_nack(delivery, multiple, requeue)
     }
 
     #[inline]
-    pub fn reject(&self, delivery: &Delivery, requeue: bool) -> Result<()> {
+    pub fn reject(&self, delivery: Delivery, requeue: bool) -> Result<()> {
         self.channel.basic_reject(delivery, requeue)
     }
 }

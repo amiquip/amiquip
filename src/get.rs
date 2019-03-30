@@ -8,17 +8,17 @@ pub struct Get {
 
 impl Get {
     #[inline]
-    pub fn ack(&self, channel: &Channel, multiple: bool) -> Result<()> {
+    pub fn ack(self, channel: &Channel, multiple: bool) -> Result<()> {
         self.delivery.ack(channel, multiple)
     }
 
     #[inline]
-    pub fn nack(&self, channel: &Channel, multiple: bool, requeue: bool) -> Result<()> {
+    pub fn nack(self, channel: &Channel, multiple: bool, requeue: bool) -> Result<()> {
         self.delivery.nack(channel, multiple, requeue)
     }
 
     #[inline]
-    pub fn reject(&self, channel: &Channel, requeue: bool) -> Result<()> {
+    pub fn reject(self, channel: &Channel, requeue: bool) -> Result<()> {
         self.delivery.reject(channel, requeue)
     }
 }

@@ -430,14 +430,14 @@ impl Channel {
         self.call_nowait(delete)
     }
 
-    pub(crate) fn basic_ack(&self, delivery: &Delivery, multiple: bool) -> Result<()> {
+    pub(crate) fn basic_ack(&self, delivery: Delivery, multiple: bool) -> Result<()> {
         self.call_nowait(AmqpBasic::Ack(Ack {
             delivery_tag: delivery.delivery_tag(),
             multiple,
         }))
     }
 
-    pub(crate) fn basic_nack(&self, delivery: &Delivery, multiple: bool, requeue: bool) -> Result<()> {
+    pub(crate) fn basic_nack(&self, delivery: Delivery, multiple: bool, requeue: bool) -> Result<()> {
         self.call_nowait(AmqpBasic::Nack(Nack {
             delivery_tag: delivery.delivery_tag(),
             multiple,
@@ -445,7 +445,7 @@ impl Channel {
         }))
     }
 
-    pub(crate) fn basic_reject(&self, delivery: &Delivery, requeue: bool) -> Result<()> {
+    pub(crate) fn basic_reject(&self, delivery: Delivery, requeue: bool) -> Result<()> {
         self.call_nowait(AmqpBasic::Reject(Reject {
             delivery_tag: delivery.delivery_tag(),
             requeue,
