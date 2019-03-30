@@ -18,7 +18,7 @@ pub struct Delivery {
     pub routing_key: String,
 
     /// The content body containing the message.
-    pub content: Vec<u8>,
+    pub body: Vec<u8>,
 
     /// Properties associated with the message.
     pub properties: AmqpProperties,
@@ -28,7 +28,7 @@ impl Delivery {
     pub(crate) fn new(
         channel_id: u16,
         deliver: Deliver,
-        content: Vec<u8>,
+        body: Vec<u8>,
         properties: AmqpProperties,
     ) -> (String, Delivery) {
         (
@@ -39,7 +39,7 @@ impl Delivery {
                 redelivered: deliver.redelivered,
                 exchange: deliver.exchange,
                 routing_key: deliver.routing_key,
-                content,
+                body,
                 properties,
             },
         )
@@ -48,7 +48,7 @@ impl Delivery {
     pub(crate) fn new_get_ok(
         channel_id: u16,
         get_ok: GetOk,
-        content: Vec<u8>,
+        body: Vec<u8>,
         properties: AmqpProperties,
     ) -> Delivery {
         Delivery {
@@ -57,7 +57,7 @@ impl Delivery {
             redelivered: get_ok.redelivered,
             exchange: get_ok.exchange,
             routing_key: get_ok.routing_key,
-            content,
+            body,
             properties,
         }
     }
