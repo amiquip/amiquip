@@ -248,7 +248,9 @@ impl IoLoop {
         handshake_done_tx: crossbeam_channel::Sender<(usize, FieldTable)>,
         ch0_slot: Channel0Slot,
     ) -> Result<()> {
+        trace!("starting TLS handshake");
         let stream = self.run_tls_handshake(stream)?;
+        trace!("finished TLS handshake");
         self.thread_main(stream, options, handshake_done_tx, ch0_slot)
     }
 
@@ -511,6 +513,23 @@ impl IoLoop {
         F: FnMut(&mut Self, &mut S, &mut State, Event) -> Result<()>,
         G: Fn(&Self, &State) -> bool,
     {
+        // Since we're called multiple times (to run TLS handshake, then AMQP handshake,
+        // then main loop), we don't know whether the socket is registered for RW or just
+        // R at entry. Check and see if we have any outgoing data to send (e.g., done
+        // with TLS handshake and need to send the AMQP protocol header), and reregister
+        // for RW if so.
+        if self.inner.has_data_to_write() {
+            trace!("reregistering socket for readable or writable");
+            self.poll
+                .reregister(
+                    stream,
+                    STREAM,
+                    Ready::readable() | Ready::writable(),
+                    PollOpt::edge(),
+                    )
+                .context(ErrorKind::Io)?;
+        }
+
         let mut events = Events::with_capacity(128);
         let mut listening_to_channels = true;
         loop {
