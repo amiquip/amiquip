@@ -4,7 +4,6 @@ use crate::{Channel, ErrorKind, FieldTable, IoStream, Result, Sasl};
 use crossbeam_channel::Receiver;
 use log::debug;
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 #[cfg(feature = "native-tls")]
 use crate::TlsConnector;
@@ -51,21 +50,6 @@ pub struct ConnectionTuning {
     /// [`buffered_writes_high_water`](struct.ConnectionTuning.html#structfield.buffered_writes_high_water)
     /// above. The default value for this field is 0 bytes.
     pub buffered_writes_low_water: usize,
-
-    /// Set the poll timeout to be used by the I/O thread. Note that setting this value can have
-    /// surprising behavior:
-    ///
-    /// * Internal messages to the I/O thread reset the poll timeout counter, so it is possible for
-    /// the underlying TCP connection to stop responding without ever triggering a poll timeout.
-    /// * If the poll timeout is set to a value less than the
-    /// [heartbeats](struct.ConnectionOptions.html#method.heartbeat) specified for the
-    /// connection, the poll timeout could fire (killing the I/O thread and ultimately connection)
-    /// even if the underlying connection is still healthy.
-    ///
-    /// The primary intention for this value is to allow the initial connection to the server to
-    /// time out. If you are not sure, leaving this value as `None` (the default) or setting it to
-    /// some value larger than twice the heartbeat option should be sufficient.
-    pub poll_timeout: Option<Duration>,
 }
 
 impl Default for ConnectionTuning {
@@ -75,7 +59,6 @@ impl Default for ConnectionTuning {
             mem_channel_bound: 16,
             buffered_writes_high_water: 16 << 20,
             buffered_writes_low_water: 0,
-            poll_timeout: None,
         }
     }
 }
@@ -103,14 +86,6 @@ impl ConnectionTuning {
     pub fn buffered_writes_low_water(self, buffered_writes_low_water: usize) -> Self {
         ConnectionTuning {
             buffered_writes_low_water,
-            ..self
-        }
-    }
-
-    /// Set the [poll timeout](#structfield.poll_timeout).
-    pub fn poll_timeout(self, poll_timeout: Option<Duration>) -> Self {
-        ConnectionTuning {
-            poll_timeout,
             ..self
         }
     }

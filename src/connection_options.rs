@@ -2,6 +2,7 @@ use crate::{ErrorKind, Result, Sasl};
 use amq_protocol::protocol::connection::{Open, Start, StartOk, Tune, TuneOk};
 use amq_protocol::protocol::constants::FRAME_MIN_SIZE;
 use amq_protocol::types::{AMQPValue, FieldTable};
+use std::time::Duration;
 
 /// Options that control the overall AMQP connection.
 ///
@@ -28,6 +29,7 @@ pub struct ConnectionOptions<Auth: Sasl> {
     pub(crate) channel_max: u16,
     pub(crate) frame_max: u32,
     pub(crate) heartbeat: u16,
+    pub(crate) connection_timeout: Option<Duration>,
 }
 
 impl<Auth: Sasl> Default for ConnectionOptions<Auth> {
@@ -40,6 +42,7 @@ impl<Auth: Sasl> Default for ConnectionOptions<Auth> {
             channel_max: 0,
             frame_max: 0,
             heartbeat: 60,
+            connection_timeout: None,
         }
     }
 }
@@ -96,6 +99,12 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
     /// the lower of the two will be used.
     pub fn heartbeat(self, heartbeat: u16) -> Self {
         ConnectionOptions { heartbeat, ..self }
+    }
+
+    /// Sets the timeout for the initial TCP connection. If None (the default), there is no
+    /// timeout.
+    pub fn connection_timeout(self, connection_timeout: Option<Duration>) -> Self {
+        ConnectionOptions { connection_timeout, ..self }
     }
 
     pub(crate) fn make_start_ok(&self, start: Start) -> Result<(StartOk, FieldTable)> {

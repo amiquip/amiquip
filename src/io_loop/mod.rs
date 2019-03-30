@@ -130,7 +130,7 @@ impl Channel0Slot {
 
 pub(crate) struct IoLoop {
     poll: Poll,
-    poll_timeout: Option<Duration>,
+    connection_timeout: Option<Duration>,
     frame_buffer: FrameBuffer,
     inner: Inner,
 
@@ -159,14 +159,14 @@ impl IoLoop {
             inner: Inner::new(heartbeats, tuning.mem_channel_bound),
             buffered_writes_high_water: tuning.buffered_writes_high_water,
             buffered_writes_low_water: tuning.buffered_writes_low_water,
-            poll_timeout: tuning.poll_timeout,
+            connection_timeout: None,
         })
     }
 
     pub(crate) fn start<Auth: Sasl, S: IoStream>(
-        self,
+        mut self,
         stream: S,
-        options: ConnectionOptions<Auth>,
+        mut options: ConnectionOptions<Auth>,
     ) -> Result<(JoinHandle<Result<()>>, FieldTable, Channel0Handle)> {
         self.poll
             .register(
@@ -177,6 +177,7 @@ impl IoLoop {
             )
             .context(ErrorKind::Io)?;
 
+        self.connection_timeout = options.connection_timeout.take();
         let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
         let (ch0_slot, ch0_handle) = Channel0Slot::new(self.inner.mio_channel_bound);
 
@@ -190,9 +191,9 @@ impl IoLoop {
 
     #[cfg(feature = "native-tls")]
     pub(crate) fn start_tls<Auth: Sasl, S: HandshakeStream>(
-        self,
+        mut self,
         stream: S,
-        options: ConnectionOptions<Auth>,
+        mut options: ConnectionOptions<Auth>,
     ) -> Result<(JoinHandle<Result<()>>, FieldTable, Channel0Handle)> {
         self.poll
             .register(
@@ -203,6 +204,7 @@ impl IoLoop {
             )
             .context(ErrorKind::Io)?;
 
+        self.connection_timeout = options.connection_timeout.take();
         let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
         let (ch0_slot, ch0_handle) = Channel0Slot::new(self.inner.mio_channel_bound);
 
@@ -320,6 +322,7 @@ impl IoLoop {
             Self::handle_handshake_event,
             Self::is_handshake_done,
         )?;
+        self.connection_timeout = None;
         match state {
             HandshakeState::Start(_)
             | HandshakeState::Secure(_, _)
@@ -499,12 +502,12 @@ impl IoLoop {
         loop {
             let start_poll = Instant::now();
             self.poll
-                .poll(&mut events, self.poll_timeout)
+                .poll(&mut events, self.connection_timeout)
                 .context(ErrorKind::Io)?;
             if events.is_empty() {
-                if let Some(timeout) = &self.poll_timeout {
+                if let Some(timeout) = &self.connection_timeout {
                     if start_poll.elapsed() > *timeout {
-                        return Err(ErrorKind::PollTimeout)?;
+                        return Err(ErrorKind::ConnectionTimeout)?;
                     }
                 }
                 continue;

@@ -65,14 +65,9 @@ pub enum ErrorKind {
     #[fail(display = "requested frame max is too small (min = {})", _0)]
     FrameMaxTooSmall(u32),
 
-    /// A timeout has occurred while waiting for poll events. This error will fire
-    /// if a connection is created with a non-`None`
-    /// [poll_timeout](struct.ConnectionTuning.html#structfield.poll_timeout) and that period of
-    /// time passes with no events waking up the I/O thread. Note that this timeout does not
-    /// necessarily indicate communication with the AMQP server, as internal channel messages also
-    /// wake up the I/O thread.
-    #[fail(display = "timeout occurred while waiting for poll events")]
-    PollTimeout,
+    /// Timeout occurred while performing the initial TCP connection.
+    #[fail(display = "timeout occurred while waiting for TCP connection")]
+    ConnectionTimeout,
 
     /// The server requested a Secure/Secure-Ok exchange, which are currently unsupported.
     #[fail(display = "SASL secure/secure-ok exchanges are not supported")]
