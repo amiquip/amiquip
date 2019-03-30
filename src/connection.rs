@@ -162,9 +162,15 @@ impl Drop for Connection {
 }
 
 impl Connection {
-    /// Open an AMQP connection from an `amqp://...` or `amqps://...` URL. The method mostly
-    /// follows the [RabbitMQ URI Specification](https://www.rabbitmq.com/uri-spec.html), with the
-    /// following differences:
+    /// Calls [`open_tuned`](#method.open_tuned) with default
+    /// [`ConnectionTuning`](struct.ConnectionTuning.html) settings.
+    pub fn open(url: &str) -> Result<Connection> {
+        Self::open_tuned(url, ConnectionTuning::default())
+    }
+
+    /// Open an AMQP connection from an `amqp://...` or `amqps://...` URL. Mostly follows the
+    /// [RabbitMQ URI Specification](https://www.rabbitmq.com/uri-spec.html), with the following
+    /// differences:
     ///
     /// * If the username and password are omitted, a username/password of `guest`/`guest` is used.
     /// * There is no way to specify a vhost of `""` (the empty string). Passing a URL without a
@@ -176,12 +182,12 @@ impl Connection {
     /// * `heartbeat`
     /// * `connection_timeout`
     /// * `channel_max`
-    /// * Partially `auth_mechanism`; the only allowed value is `external`, and if this query
+    /// * `auth_mechanism` (partial); the only allowed value is `external`, and if this query
     /// parameter is given any username or password on the URL will be ignored.
     ///
     /// Using `amqps` URLs requires amiquip to be built with the `native-tls` feature. The
-    /// TLS-related query parameters are not supported; use [`open_tls`](#method.open_tls) with a
-    /// configured `TlsConnector` if you need control over the TLS parameters.
+    /// TLS-related RabbitMQ query parameters are not supported; use [`open_tls`](#method.open_tls)
+    /// with a configured `TlsConnector` if you need control over the TLS parameters.
     ///
     /// # Examples
     ///
@@ -197,11 +203,11 @@ impl Connection {
     /// #     Ok(TcpStream::connect(&addr.parse().unwrap()).unwrap())
     /// # }
     ///
-    /// # fn open_url_examples() -> Result<()> {
+    /// # fn open_examples() -> Result<()> {
     /// // Empty amqp URL is equivalent to default options; handy for initial debugging and
     /// // development.
-    /// let conn1 = Connection::open_url("amqp://", ConnectionTuning::default())?;
-    /// let conn1 = Connection::open(
+    /// let conn1 = Connection::open("amqp://")?;
+    /// let conn1 = Connection::open_stream(
     ///     tcp_stream("localhost:5672")?,
     ///     ConnectionOptions::<Auth>::default(),
     ///     ConnectionTuning::default(),
@@ -209,11 +215,10 @@ impl Connection {
     ///
     /// // All possible options specified in the URL except auth_mechanism=external (which would
     /// // override the username and password).
-    /// let conn3 = Connection::open_url(
-    ///     "amqp://user:pass@example.com:12345/myvhost?heartbeat=30&channel_max=1024&connection_timeout=10000",
-    ///     ConnectionTuning::default(),
-    /// )?;
     /// let conn3 = Connection::open(
+    ///     "amqp://user:pass@example.com:12345/myvhost?heartbeat=30&channel_max=1024&connection_timeout=10000",
+    /// )?;
+    /// let conn3 = Connection::open_stream(
     ///     tcp_stream("example.com:12345")?,
     ///     ConnectionOptions::default()
     ///         .auth(Auth::Plain {
@@ -228,12 +233,12 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn open_url(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
+    pub fn open_tuned(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
         self::amqp_url::open(url, tuning)
     }
 
     /// Open an AMQP connection on a stream (typically a `mio::net::TcpStream`).
-    pub fn open<Auth: Sasl, S: IoStream>(
+    pub fn open_stream<Auth: Sasl, S: IoStream>(
         stream: S,
         options: ConnectionOptions<Auth>,
         tuning: ConnectionTuning,
@@ -416,7 +421,9 @@ mod amqp_url {
             let result = TcpStream::connect(&addr)
                 .context(ErrorKind::Io)
                 .map_err(|err| Error::from(err))
-                .and_then(|stream| Connection::open(stream, options.clone(), tuning.clone()));
+                .and_then(|stream| {
+                    Connection::open_stream(stream, options.clone(), tuning.clone())
+                });
             match result {
                 Ok(connection) => return Ok(connection),
                 Err(err) => {
