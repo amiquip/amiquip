@@ -235,7 +235,7 @@ impl IoLoop {
                     unreachable!("I/O thread ended successfully without completing handshake")
                 }
                 Ok(Err(err)) => Err(err),
-                Err(err) => Err(ErrorKind::IoThreadPanic(format!("{:?}", err)).into()),
+                Err(_) => Err(ErrorKind::IoThreadPanic.into()),
             },
         }
     }

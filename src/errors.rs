@@ -156,8 +156,8 @@ pub enum ErrorKind {
     ReceivedFrameWithBogusChannelId(u16),
 
     /// The I/O thread panicked.
-    #[fail(display = "I/O thread died unexpectedly: {}", _0)]
-    IoThreadPanic(String),
+    #[fail(display = "I/O thread panicked")]
+    IoThreadPanic,
 
     /// The server sent us a consumer tag that is equal to another consumer tag we already have on
     /// the same channel.

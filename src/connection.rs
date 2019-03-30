@@ -32,7 +32,7 @@ pub struct ConnectionTuning {
     /// Set the bound used when creating `mio_extras::channel::sync_channel()` channels for sending
     /// messages to the connection's I/O thread. The default value for this field is 16.
     ///
-    /// See the discussion on [amiquip's design details](index.html#design-details) for more
+    /// See the discussion on [connection tuning](struct.Connection.html#tuning) for more
     /// information.
     pub mem_channel_bound: usize,
 
@@ -43,13 +43,15 @@ pub struct ConnectionTuning {
     /// [`buffered_writes_low_water`](struct.ConnectionTuning.html#structfield.buffered_writes_low_water)
     /// bytes. The default value for this field is 16 MiB.
     ///
-    /// See the discussion on [amiquip's design details](index.html#design-details) for more
+    /// See the discussion on [connection tuning](struct.Connection.html#tuning) for more
     /// information.
     pub buffered_writes_high_water: usize,
 
-    /// Set the low water mark for the I/O thread to resume reading from client channels. See
-    /// [`buffered_writes_high_water`](struct.ConnectionTuning.html#structfield.buffered_writes_high_water)
-    /// above. The default value for this field is 0 bytes.
+    /// Set the low water mark for the I/O thread to resume reading from client channels. The
+    /// default value for this field is 0 bytes.
+    ///
+    /// See the discussion on [connection tuning](struct.Connection.html#tuning) for more
+    /// information.
     pub buffered_writes_low_water: usize,
 }
 
@@ -92,6 +94,61 @@ impl ConnectionTuning {
     }
 }
 
+/// Handle for an AMQP connection.
+///
+/// Opening an AMQP connection creates at least one thread - the I/O thread which is responsible
+/// for driving the underlying socket and communicating back with the `Connection` handle and any
+/// open [`Channel`](struct.Channel.html)s. An additional thread may be created to handle heartbeat
+/// timers; this is an implementation detail that may not be true on all platforms.
+///
+/// Closing the connection (or dropping it) will attempt to `join` on the I/O thread. This can
+/// block; see the [`close`](#method.close) for notes.
+///
+/// # Tuning
+///
+/// Opening a connection requires specifying [`ConnectionTuning`](struct.ConnectionTuning.html)
+/// parameters. These control resources and backpressure between the I/O loop thread and its
+/// `Connection` handle and open channels. This structure has three fields:
+///
+/// * [`mem_channel_bound`](struct.ConnectionTuning.html#structfield.mem_channel_bound) controls
+/// the channel size for communication from a `Connection` and its channels into the I/O thread.
+/// Setting this to 0 means all communications from a handle into the I/O thread will block until
+/// the I/O thread is ready to receive the message; setting it to something higher than 0 means
+/// messages into the I/O thread will be buffered and will not block. Note that many methods are
+/// synchronous in the AMQP sense (e.g., [`Channel::queue_declare`](struct.Channel.html)) and will
+/// see no benefit from buffering, as they must wait for a response from the I/O thread before they
+/// return. This bound may improve performance for asynchronous messages, but see the next two
+/// fields.
+///
+/// * [`buffered_writes_high_water`](struct.ConnectionTuning.html#structfield.buffered_writes_high_water)
+/// and
+/// [`buffered_writes_low_water`](struct.ConnectionTuning.html#structfield.buffered_writes_low_water)
+/// control how much outgoing data the I/O thread is willing to buffer up before it starts
+/// applying backpressure to the in-memory channels that `Connection` and its AMQP channels use to
+/// send it messages. This prevents unbounded memory growth in the I/O thread if local clients are
+/// attempting to send data faster than the AMQP server is able to receive it. If the I/O thread
+/// buffers up more than `buffered_writes_high_water` bytes of data, it will stop polling channels
+/// until the amount of data drops below `buffered_writes_low_water`. These values combine with
+/// `mem_channel_bound` to apply two different kinds of buffering and backpressure.
+///
+/// For example, suppose a connection is used exclusively for publishing data, and it is attempting
+/// to publish data as quickly as possible. It sets `mem_channel_bound` to 16,
+/// `buffered_writes_high_water` to 16 MiB, and `buffered_writes_low_water` to 1 MiB. Once it has
+/// published enough data that the I/O thread crosses the 16 MiB mark for buffered outgoing data,
+/// the publisher will be able to send 16 more messages into the I/O thread (note that this does
+/// necessarily mean full data messages, as AMQP messages will be broken up into muliple framed
+/// messages internally), at which point additional sends into the I/O thread will block. Once the
+/// I/O thread's buffered data amount drops below 1 MiB, it will resume polling the in-memory
+/// channel, pulling from the 16 buffered messages, freeing up space and unblocking the publisher.
+///
+/// # Thread Safety
+///
+/// `Connection` implements both `Send` and `Sync`; however, its most useful method
+/// ([`open_channel`](#method.open_channel)) takes `&mut self`, which requires unique ownership.
+/// The channels returned by [`open_channel`](#method.open_channel) themselves implement `Send` but
+/// not `Sync`. After opening a connection one thread, you are free to create any number of
+/// channels and send them to other threads for use. However, they are all tied back to the
+/// original connection; when it is closed or dropped, future operations on them will fail.
 pub struct Connection {
     join_handle: Option<JoinHandle<Result<()>>>,
     channel0: Channel0Handle,
@@ -105,10 +162,77 @@ impl Drop for Connection {
 }
 
 impl Connection {
+    /// Open an AMQP connection from an `amqp://...` or `amqps://...` URL. The method mostly
+    /// follows the [RabbitMQ URI Specification](https://www.rabbitmq.com/uri-spec.html), with the
+    /// following differences:
+    ///
+    /// * If the username and password are omitted, a username/password of `guest`/`guest` is used.
+    /// * There is no way to specify a vhost of `""` (the empty string). Passing a URL without a
+    /// vhost will result in an open request to the default AMQP vhost of `/`.
+    ///
+    /// A subset of the [RabbitMQ query
+    /// parameters](https://www.rabbitmq.com/uri-query-parameters.html) are supported:
+    ///
+    /// * `heartbeat`
+    /// * `connection_timeout`
+    /// * `channel_max`
+    /// * Partially `auth_mechanism`; the only allowed value is `external`, and if this query
+    /// parameter is given any username or password on the URL will be ignored.
+    ///
+    /// Using `amqps` URLs requires amiquip to be built with the `native-tls` feature. The
+    /// TLS-related query parameters are not supported; use [`open_tls`](#method.open_tls) with a
+    /// configured `TlsConnector` if you need control over the TLS parameters.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use amiquip::{Auth, Connection, ConnectionOptions, ConnectionTuning, Result};
+    /// use std::time::Duration;
+    ///
+    /// // Examples below assume a helper function to open a TcpStream from an address string with
+    /// // a signature like this is available:
+    /// //   fn tcp_stream(addr: &str) -> Result<mio::net::TcpStream>;
+    /// # use mio::net::TcpStream;
+    /// # fn tcp_stream(addr: &str) -> Result<TcpStream> {
+    /// #     Ok(TcpStream::connect(&addr.parse().unwrap()).unwrap())
+    /// # }
+    ///
+    /// # fn open_url_examples() -> Result<()> {
+    /// // Empty amqp URL is equivalent to default options; handy for initial debugging and
+    /// // development.
+    /// let conn1 = Connection::open_url("amqp://", ConnectionTuning::default())?;
+    /// let conn1 = Connection::open(
+    ///     tcp_stream("localhost:5672")?,
+    ///     ConnectionOptions::<Auth>::default(),
+    ///     ConnectionTuning::default(),
+    /// )?;
+    ///
+    /// // All possible options specified in the URL except auth_mechanism=external (which would
+    /// // override the username and password).
+    /// let conn3 = Connection::open_url(
+    ///     "amqp://user:pass@example.com:12345/myvhost?heartbeat=30&channel_max=1024&connection_timeout=10000",
+    ///     ConnectionTuning::default(),
+    /// )?;
+    /// let conn3 = Connection::open(
+    ///     tcp_stream("example.com:12345")?,
+    ///     ConnectionOptions::default()
+    ///         .auth(Auth::Plain {
+    ///             username: "user".to_string(),
+    ///             password: "pass".to_string(),
+    ///         })
+    ///         .heartbeat(30)
+    ///         .channel_max(1024)
+    ///         .connection_timeout(Some(Duration::from_millis(10_000))),
+    ///     ConnectionTuning::default(),
+    /// )?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn open_url(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
         self::amqp_url::open(url, tuning)
     }
 
+    /// Open an AMQP connection on a stream (typically a `mio::net::TcpStream`).
     pub fn open<Auth: Sasl, S: IoStream>(
         stream: S,
         options: ConnectionOptions<Auth>,
@@ -123,6 +247,8 @@ impl Connection {
         })
     }
 
+    /// Open an encrypted AMQP connection on a stream (typically a `mio::net::TcpStream`)
+    /// using the provided [`TlsConnector`](struct.TlsConnector.html).
     #[cfg(feature = "native-tls")]
     pub fn open_tls<Auth: Sasl, C: Into<TlsConnector>, S: IoStream>(
         connector: C,
@@ -141,14 +267,54 @@ impl Connection {
         })
     }
 
+    /// Get the properties reported by the server during the initial AMQP handshake. This typically
+    /// includes string fields like:
+    ///
+    /// * `cluster_name`
+    /// * `copyright`
+    /// * `platform`
+    /// * `product`
+    /// * `version`
+    ///
+    /// It also typically includes a nested `FieldTable` under the key `capabilities` that
+    /// describes extensions supported by the server. Relevant capabilities to amiquip include:
+    ///
+    /// * `basic.nack` - required to use [`Delivery::nack`](struct.Delivery.html#method.nack)
+    /// * `connection.blocked` - required for
+    /// [`listen_for_connection_blocked`](#method.listen_for_connection_blocked) to receive
+    /// notifications.
+    /// * `consumer_cancel_notify` - if present, the server may cancel consumers (e.g., if its
+    /// queue is deleted)
+    /// * `exchange_exchange_bindings` - required for
+    /// [`Exchange::bind_to_source`](struct.Exchange.html#method.bind_to_source) and related
+    /// exchange-to-exchange binding methods.
     pub fn server_properties(&self) -> &FieldTable {
         &self.server_properties
     }
 
-    pub fn close(mut self) -> Result<()> {
-        self.close_impl()
+    /// Open an AMQP channel on this connection. If `channel_id` is `Some`, the returned channel
+    /// will have the request ID if possible, or an error will be returned if that channel ID not
+    /// available. If `channel_id` is `None`, the connection will choose an available channel ID
+    /// (unless all available channel IDs are exhausted, in which case this method will return
+    /// [`ErrorKind::ExhaustedChannelIds`](enum.ErrorKind.html#variant.ExhaustedChannelIds).
+    ///
+    /// The returned channel is tied to this connection in a logical sense but not in any ownership
+    /// way. For example, it may be passed to a thread for use. However, closing (or dropping,
+    /// which also closes) this connection will cause operations on all opened channels to fail.
+    pub fn open_channel(&mut self, channel_id: Option<u16>) -> Result<Channel> {
+        let handle = self.channel0.open_channel(channel_id)?;
+        Ok(Channel::new(handle))
     }
 
+    /// Open a crossbeam channel to receive [connection blocked
+    /// notifications](https://www.rabbitmq.com/connection-blocked.html) from the server.
+    ///
+    /// There can be only one connection blocked listener. If you call this method a second (or
+    /// more) time, the I/O thread will drop the sending side of previously returned channels.
+    ///
+    /// Dropping the `Receiver` returned by this method is harmless. If the I/O loop receives a
+    /// connection blocked notification and there is no listener registered or the
+    /// previously-registered listener has been dropped, it will discard the notification.
     pub fn listen_for_connection_blocked(
         &mut self,
     ) -> Result<Receiver<ConnectionBlockedNotification>> {
@@ -157,24 +323,65 @@ impl Connection {
         Ok(rx)
     }
 
+    /// Close this connection. This method will join on the I/O thread handle, so it may block for
+    /// a nontrivial amount of time. If heartbeats are not enabled, it is possible this method
+    /// could block indefinitely waiting for the server to respond to our close request.
+    ///
+    /// Closing a connection will cause future operations on any channels opened on this connection
+    /// to fail.
+    ///
+    /// If the I/O thread panics, this method will return an error with its
+    /// [kind](struct.Error.html#method.kind) set to
+    /// [`ErrorKind::IoThreadPanic`](enum.ErrorKind.html#variant.IoThreadPanic). (Note - the I/O
+    /// thread _should not_ panic. If it does, please [file an
+    /// issue](https://github.com/jgallagher/amiquip/issues).) For this reason, applications that
+    /// want more detail about errors to separate the use of the connection from closing it. For
+    /// example:
+    ///
+    /// ```rust
+    /// use amiquip::{Connection, Result, ErrorKind};
+    ///
+    /// fn use_connection(connection: &mut Connection) -> Result<()> {
+    ///     // ...do all the things...
+    ///     # Ok(())
+    /// }
+    ///
+    /// fn run_connection(mut connection: Connection) -> Result<()> {
+    ///     // capture any errors from using the connection, but don't immediately return.
+    ///     let use_result = use_connection(&mut connection);
+    ///
+    ///     // close the connection; if this fails, it is probably the most useful error
+    ///     // message (since it may indicate an I/O thread panic or other fatal error).
+    ///     connection.close()?;
+    ///
+    ///     // if close completed succsssfully, return `use_result`, which might still contain
+    ///     // some other kind of error.
+    ///     use_result
+    /// }
+    /// ```
+    pub fn close(mut self) -> Result<()> {
+        self.close_impl()
+    }
+
     fn close_impl(&mut self) -> Result<()> {
         if let Some(join_handle) = self.join_handle.take() {
             debug!("closing connection");
-            self.channel0.close_connection()?;
-            join_handle
-                .join()
-                .map_err(|err| ErrorKind::IoThreadPanic(format!("{:?}", err)))?
+            // capture close result, but don't return it yet (if the I/O thread panicked,
+            // for example, this will fail but we want to capture the panic thread when
+            // we join the thread momentarily).
+            let close_result = self.channel0.close_connection();
+
+            // wait for the I/O thread to end, and return its panic or error.
+            join_handle.join().map_err(|_| ErrorKind::IoThreadPanic)??;
+
+            // join ended cleanly; return the result of closing the connection.
+            close_result
         } else {
             // no join handle left - someone already took it, which is only possible
             // if we're being called from Drop after someone called close(), and drop
             // doesn't care what we return.
             Ok(())
         }
-    }
-
-    pub fn open_channel(&mut self, channel_id: Option<u16>) -> Result<Channel> {
-        let handle = self.channel0.open_channel(channel_id)?;
-        Ok(Channel::new(handle))
     }
 }
 
