@@ -3,6 +3,23 @@ use amq_protocol::protocol::connection::{Open, Start, StartOk, Tune, TuneOk};
 use amq_protocol::protocol::constants::FRAME_MIN_SIZE;
 use amq_protocol::types::{AMQPValue, FieldTable};
 
+/// Options that control the overall AMQP connection.
+///
+/// `ConnectionOptions` uses the builder pattern. The default settings are equivalent to
+///
+/// ```rust
+/// use amiquip::{Auth, ConnectionOptions};
+///
+/// # fn default_connection_options() -> ConnectionOptions<Auth> {
+/// ConnectionOptions::default()
+///     .auth(Auth::default())
+///     .virtual_host("/")
+///     .locale("en_US")
+///     .channel_max(0)
+///     .frame_max(0)
+///     .heartbeat(60)
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct ConnectionOptions<Auth: Sasl> {
     pub(crate) auth: Auth,
@@ -14,23 +31,26 @@ pub struct ConnectionOptions<Auth: Sasl> {
 }
 
 impl<Auth: Sasl> Default for ConnectionOptions<Auth> {
+    // NOTE: If we change this, make sure to change the doc comment above.
     fn default() -> Self {
         ConnectionOptions {
             auth: Auth::default(),
             virtual_host: "/".to_string(),
             locale: "en_US".to_string(),
-            channel_max: u16::max_value(),
-            frame_max: 1 << 17,
+            channel_max: 0,
+            frame_max: 0,
             heartbeat: 60,
         }
     }
 }
 
 impl<Auth: Sasl> ConnectionOptions<Auth> {
+    /// Sets the SASL authentication method.
     pub fn auth(self, auth: Auth) -> Self {
         ConnectionOptions { auth, ..self }
     }
 
+    /// Sets the AMQP virtual host.
     pub fn virtual_host<T: Into<String>>(self, virtual_host: T) -> Self {
         ConnectionOptions {
             virtual_host: virtual_host.into(),
@@ -38,6 +58,8 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         }
     }
 
+    /// Sets the locale. AMQP requires servers support the `en_US` locale (which is also the
+    /// default locale for `ConnectionOptions`).
     pub fn locale<T: Into<String>>(self, locale: T) -> Self {
         ConnectionOptions {
             locale: locale.into(),
@@ -45,6 +67,10 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         }
     }
 
+    /// Sets the maximum number of channels that can be opened simultaneously on this connection.
+    /// Setting this value to 0 means to let the server choose. If this value is set to a nonzero
+    /// value that is different from the server's requested value, the lower of the two will be
+    /// used.
     pub fn channel_max(self, channel_max: u16) -> Self {
         ConnectionOptions {
             channel_max,
@@ -52,10 +78,22 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         }
     }
 
+    /// Sets the maximum size in bytes of frames used for this connection.  Setting this value to 0
+    /// means to let the server choose. If this value is set to a nonzero value that is different
+    /// from the server's requested value, the lower of the two will be used.
+    ///
+    /// The frame max setting says nothing about the maximum size of messages; messages larger than
+    /// `frame_max` bytes will be broken up into multiple frames.
+    ///
+    /// Note that AMQP specifies a minimum frame_max of 4096; attempting to set a value lower than
+    /// this will result in an error when attempting to open the connection.
     pub fn frame_max(self, frame_max: u32) -> Self {
         ConnectionOptions { frame_max, ..self }
     }
 
+    /// Sets the heartbeat interval in seconds. Setting this value to 0 disables heartbeats. If
+    /// this value is greater than 0 but different than the server's requested heartbeat interval,
+    /// the lower of the two will be used.
     pub fn heartbeat(self, heartbeat: u16) -> Self {
         ConnectionOptions { heartbeat, ..self }
     }
@@ -116,18 +154,27 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
     }
 
     pub(crate) fn make_tune_ok(&self, tune: Tune) -> Result<TuneOk> {
-        let chan_max0 = if tune.channel_max == 0 {
-            u16::max_value()
-        } else {
-            tune.channel_max
-        };
-        let chan_max1 = if self.channel_max == 0 {
-            u16::max_value()
-        } else {
-            self.channel_max
-        };
+        fn promote_0_u16(mut val: u16) -> u16 {
+            if val == 0 {
+                val = u16::max_value();
+            }
+            val
+        }
+        fn promote_0_u32(mut val: u32) -> u32 {
+            if val == 0 {
+                val = u32::max_value();
+            }
+            val
+        }
+
+        let chan_max0 = promote_0_u16(tune.channel_max);
+        let chan_max1 = promote_0_u16(self.channel_max);
+
+        let frame_max0 = promote_0_u32(tune.frame_max);
+        let frame_max1 = promote_0_u32(self.frame_max);
+
         let channel_max = u16::min(chan_max0, chan_max1);
-        let frame_max = u32::min(tune.frame_max, self.frame_max);
+        let frame_max = u32::min(frame_max0, frame_max1);
         let heartbeat = u16::min(tune.heartbeat, self.heartbeat);
 
         if frame_max < u32::from(FRAME_MIN_SIZE) {
@@ -236,7 +283,7 @@ mod tests {
 
     #[test]
     fn frame_max_too_small() {
-        let frame_max = FRAME_MIN_SIZE as u32 - 1;
+        let frame_max = u32::from(FRAME_MIN_SIZE) - 1;
         let options = ConnectionOptions::<Auth>::default().frame_max(frame_max);
 
         let tune = Tune {
@@ -249,7 +296,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(
             *res.unwrap_err().kind(),
-            ErrorKind::FrameMaxTooSmall(FRAME_MIN_SIZE as u32)
+            ErrorKind::FrameMaxTooSmall(u32::from(FRAME_MIN_SIZE))
         );
     }
 }
