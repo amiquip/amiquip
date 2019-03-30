@@ -1,6 +1,30 @@
-use crate::{Channel, Delivery, ErrorKind, Result};
+use crate::{Channel, Delivery, ErrorKind, FieldTable, Result};
 use crossbeam_channel::Receiver;
 use std::cell::Cell;
+
+/// Options passed to the server when starting a consumer.
+///
+/// The [`default`](#impl-Default) implementation sets all boolean fields to false and has an empty
+/// set of arguments.
+#[derive(Clone, Debug, Default)]
+pub struct ConsumerOptions {
+    /// If true, the server will not send this consumer messages that were published by the
+    /// consumer's connection.
+    pub no_local: bool,
+
+    /// If true, the server assumes all delivered messages are acknowledged, and the client should
+    /// not acknowledge messages. If using this option, be aware of [unbounded memory
+    /// growth](struct.Channel.html#unbounded-memory-usage) concerns.
+    pub no_ack: bool,
+
+    /// If true, requires that this consumer is the only one attached to the queue. If other
+    /// consumers are active, the server will close the channel.
+    pub exclusive: bool,
+
+    /// Extra arguments; these are optional in general, but may be needed for some plugins or
+    /// server-specific features.
+    pub arguments: FieldTable,
+}
 
 /// Messages delivered to consumers.
 #[derive(Clone, Debug)]

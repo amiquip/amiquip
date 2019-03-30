@@ -1,8 +1,8 @@
 use crate::io_loop::ChannelHandle;
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
 use crate::{
-    Consumer, Delivery, Exchange, ExchangeDeclareOptions, ExchangeType, Get, Queue,
-    QueueDeclareOptions, QueueDeleteOptions, Result, Return,
+    Consumer, ConsumerOptions, Delivery, Exchange, ExchangeDeclareOptions, ExchangeType, Get,
+    Queue, QueueDeclareOptions, QueueDeleteOptions, Result, Return,
 };
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Get as AmqpGet;
@@ -298,24 +298,10 @@ impl Channel {
     /// Synchronously set up a consumer on `queue`. If the queue does not exist, the server will
     /// close this channel. Consider using one of the [`queue_declare`](#method.queue_declare)
     /// methods and then [`Queue::consume`](struct.Queue.html#method.consume) to avoid this.
-    ///
-    /// If `no_local` is true, the server will not send this consumer any messages published by the
-    /// same connection that opened this channel.
-    ///
-    /// If `no_ack` is false, you are responsible for acknowledging deliveries. If `no_ack` is
-    /// true, the server implicitly acknowledges all deliveries as it sends them. This can lead to
-    /// [unbounded memory growth](#unbounded-memory-usage) inside amiquip if deliveries arrive
-    /// faster than they can be processed.
-    ///
-    /// If `exclusive` is true, the server either guarantees that this is the only consumer on
-    /// `queue`; if it cannot, it will close this channel.
     pub fn basic_consume<S: Into<String>>(
         &self,
         queue: S,
-        no_local: bool,
-        no_ack: bool,
-        exclusive: bool,
-        arguments: FieldTable,
+        options: ConsumerOptions,
     ) -> Result<Consumer> {
         // NOTE: We currently don't support nowait consumers for two reasons:
         // 1. We always let the server pick the consumption tag, so without
@@ -326,11 +312,11 @@ impl Channel {
             ticket: 0,
             queue: queue.into(),
             consumer_tag: String::new(),
-            no_local,
-            no_ack,
-            exclusive,
+            no_local: options.no_local,
+            no_ack: options.no_ack,
+            exclusive: options.exclusive,
             nowait: false,
-            arguments,
+            arguments: options.arguments,
         })?;
         Ok(Consumer::new(self, tag, rx))
     }

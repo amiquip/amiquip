@@ -1,4 +1,4 @@
-use crate::{Channel, Consumer, Delivery, Exchange, FieldTable, Get, Result};
+use crate::{Channel, Consumer, ConsumerOptions, Delivery, Exchange, FieldTable, Get, Result};
 use amq_protocol::protocol::queue::{Declare, Delete};
 
 /// Options passed to the server when declaring a queue.
@@ -135,23 +135,9 @@ impl Queue<'_> {
     }
 
     /// Synchronously start a consumer on this queue.
-    ///
-    /// If `no_local` is true, the server will not send you messages that were published within the
-    /// same connection. If `no_ack` is false, you are responsible for acknowledging deliveries,
-    /// typically via [`Delivery::ack`](struct.Delivery.html#method.ack). If exclusive is true,
-    /// requests exclusive access to the queue; if other consumers are active, the server will
-    /// close the channel with an access-refused error. `arguments` are typically optional, and are
-    /// plugin / server dependent.
     #[inline]
-    pub fn consume(
-        &self,
-        no_local: bool,
-        no_ack: bool,
-        exclusive: bool,
-        arguments: FieldTable,
-    ) -> Result<Consumer> {
-        self.channel
-            .basic_consume(self.name.clone(), no_local, no_ack, exclusive, arguments)
+    pub fn consume(&self, options: ConsumerOptions) -> Result<Consumer> {
+        self.channel.basic_consume(self.name.clone(), options)
     }
 
     /// Synchronously bind this queue to an exchange with the given routing key. `arguments` are
