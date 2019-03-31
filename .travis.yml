@@ -15,4 +15,4 @@ matrix:
 
 script:
     - cargo test --all
-    - cargo test --all features native-tls
+    - cargo test --all --features native-tls
