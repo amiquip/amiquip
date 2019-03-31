@@ -4,8 +4,15 @@ version = "0.1.0"
 authors = ["John Gallagher <johnkgallagher@gmail.com>"]
 edition = "2018"
 build = "build.rs"
+description = "Pure Rust RabbitMQ client"
+repository = "https://github.com/jgallagher/amiquip"
+readme = "README.md"
+keywords = ["rabbitmq", "amqp"]
+categories = ["network-programming", "api-bindings"]
+license = "MIT OR Apache-2.0"
 
-[features]
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 failure = "0.1"
