@@ -21,6 +21,9 @@ use super::{
     Inner,
 };
 
+// Clippy warns about ConnectionState::Steady being much larger than the other variants, but we
+// expect ConnectionState to be in the Steady case almost all the time.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum ConnectionState {
     Steady(Channel0Slot),
     ServerClosing(ConnectionClose),
@@ -32,21 +35,21 @@ fn slot_remove(inner: &mut Inner, channel_id: u16) -> Result<ChannelSlot> {
     Ok(inner
         .chan_slots
         .remove(channel_id)
-        .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
+        .ok_or_else(|| ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
 }
 
 fn slot_get(inner: &mut Inner, channel_id: u16) -> Result<&ChannelSlot> {
     Ok(inner
         .chan_slots
         .get(channel_id)
-        .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
+        .ok_or_else(|| ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
 }
 
 fn slot_get_mut(inner: &mut Inner, channel_id: u16) -> Result<&mut ChannelSlot> {
     Ok(inner
         .chan_slots
         .get_mut(channel_id)
-        .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
+        .ok_or_else(|| ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
 }
 
 fn send<T: Send + Sync + 'static>(tx: &Sender<T>, item: T) -> Result<()> {
@@ -277,7 +280,7 @@ impl ConnectionState {
             // Server ack for get (no message).
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::GetEmpty(_))) => {
                 let slot = slot_get(inner, n)?;
-                send(&slot.tx, Ok(ChannelMessage::GetOk(None)))?;
+                send(&slot.tx, Ok(ChannelMessage::GetOk(Box::new(None))))?;
             }
             // Generic ack messages we send back to the caller.
             AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::QosOk(_)))
@@ -345,14 +348,14 @@ impl ConnectionState {
                             let tx = slot
                                 .consumers
                                 .get(&consumer_tag)
-                                .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
+                                .ok_or_else(|| ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {
                             try_send_return(slot, return_);
                         }
                         CollectorResult::Get(get) => {
-                            send(&slot.tx, Ok(ChannelMessage::GetOk(Some(get))))?;
+                            send(&slot.tx, Ok(ChannelMessage::GetOk(Box::new(Some(get)))))?;
                         }
                     }
                 }
@@ -366,14 +369,14 @@ impl ConnectionState {
                             let tx = slot
                                 .consumers
                                 .get(&consumer_tag)
-                                .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
+                                .ok_or_else(|| ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {
                             try_send_return(slot, return_);
                         }
                         CollectorResult::Get(get) => {
-                            send(&slot.tx, Ok(ChannelMessage::GetOk(Some(get))))?;
+                            send(&slot.tx, Ok(ChannelMessage::GetOk(Box::new(Some(get)))))?;
                         }
                     }
                 }

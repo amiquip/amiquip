@@ -420,7 +420,7 @@ mod amqp_url {
         for addr in url.to_socket_addrs().context(ErrorKind::Io)? {
             let result = TcpStream::connect(&addr)
                 .context(ErrorKind::Io)
-                .map_err(|err| Error::from(err))
+                .map_err(Error::from)
                 .and_then(|stream| {
                     Connection::open_stream(stream, options.clone(), tuning.clone())
                 });

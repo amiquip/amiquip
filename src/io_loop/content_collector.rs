@@ -199,6 +199,9 @@ enum Content<T: ContentType> {
     NeedMore(State<T>),
 }
 
+// Clippy warns about State::Body being much larger than the other variant, but we
+// expect almost all instances of State to transition to Body.
+#[allow(clippy::large_enum_variant)]
 enum State<T: ContentType> {
     Start(T::Start),
     Body(T::Start, AMQPContentHeader, Vec<u8>),
