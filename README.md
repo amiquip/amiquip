@@ -1,11 +1,9 @@
 # amiquip
 
-<!-- Uncomment once these exist.
 [![Travis Build Status](https://api.travis-ci.org/jgallagher/amiquip.svg?branch=master)](https://travis-ci.org/jgallagher/amiquip)
 [![dependency status](https://deps.rs/repo/github/jgallagher/amiquip/status.svg)](https://deps.rs/repo/github/jgallagher/amiquip)
 [![Latest Version](https://img.shields.io/crates/v/amiquip.svg)](https://crates.io/crates/amiquip)
 [![Docs](https://docs.rs/amiquip/badge.svg)](https://docs.rs/amiquip)
--->
 
 amiquip is a RabbitMQ client written in pure Rust.
 
@@ -18,7 +16,7 @@ Add this to your `Cargo.toml`:
 amiquip = "0.1"
 ```
 
-For usage, see the [documentation](#TODO-link-to-docs-rs) and
+For usage, see the [documentation](https://docs.rs/amiquip/) and
 [examples](https://github.com/jgallagher/amiquip/tree/master/examples).
 
 ## Feature `native-tls`
