@@ -35,21 +35,21 @@ fn slot_remove(inner: &mut Inner, channel_id: u16) -> Result<ChannelSlot> {
     Ok(inner
         .chan_slots
         .remove(channel_id)
-        .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
+        .ok_or_else(|| ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
 }
 
 fn slot_get(inner: &mut Inner, channel_id: u16) -> Result<&ChannelSlot> {
     Ok(inner
         .chan_slots
         .get(channel_id)
-        .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
+        .ok_or_else(|| ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
 }
 
 fn slot_get_mut(inner: &mut Inner, channel_id: u16) -> Result<&mut ChannelSlot> {
     Ok(inner
         .chan_slots
         .get_mut(channel_id)
-        .ok_or(ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
+        .ok_or_else(|| ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
 }
 
 fn send<T: Send + Sync + 'static>(tx: &Sender<T>, item: T) -> Result<()> {
@@ -348,7 +348,7 @@ impl ConnectionState {
                             let tx = slot
                                 .consumers
                                 .get(&consumer_tag)
-                                .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
+                                .ok_or_else(|| ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {
@@ -369,7 +369,7 @@ impl ConnectionState {
                             let tx = slot
                                 .consumers
                                 .get(&consumer_tag)
-                                .ok_or(ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
+                                .ok_or_else(|| ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {
