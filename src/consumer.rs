@@ -27,6 +27,9 @@ pub struct ConsumerOptions {
 }
 
 /// Messages delivered to consumers.
+// Clippy warns about ConsumerMessage::Delivery being much larger than the other variants, but we
+// expect almost all instances of ConsumerMessage to be Deliveries.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum ConsumerMessage {
     /// A delivered message.

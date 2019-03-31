@@ -21,6 +21,9 @@ use super::{
     Inner,
 };
 
+// Clippy warns about ConnectionState::Steady being much larger than the other variants, but we
+// expect ConnectionState to be in the Steady case almost all the time.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum ConnectionState {
     Steady(Channel0Slot),
     ServerClosing(ConnectionClose),
@@ -277,7 +280,7 @@ impl ConnectionState {
             // Server ack for get (no message).
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::GetEmpty(_))) => {
                 let slot = slot_get(inner, n)?;
-                send(&slot.tx, Ok(ChannelMessage::GetOk(None)))?;
+                send(&slot.tx, Ok(ChannelMessage::GetOk(Box::new(None))))?;
             }
             // Generic ack messages we send back to the caller.
             AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::QosOk(_)))
@@ -352,7 +355,7 @@ impl ConnectionState {
                             try_send_return(slot, return_);
                         }
                         CollectorResult::Get(get) => {
-                            send(&slot.tx, Ok(ChannelMessage::GetOk(Some(get))))?;
+                            send(&slot.tx, Ok(ChannelMessage::GetOk(Box::new(Some(get)))))?;
                         }
                     }
                 }
@@ -373,7 +376,7 @@ impl ConnectionState {
                             try_send_return(slot, return_);
                         }
                         CollectorResult::Get(get) => {
-                            send(&slot.tx, Ok(ChannelMessage::GetOk(Some(get))))?;
+                            send(&slot.tx, Ok(ChannelMessage::GetOk(Box::new(Some(get)))))?;
                         }
                     }
                 }

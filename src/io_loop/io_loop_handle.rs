@@ -56,7 +56,7 @@ impl IoLoopHandle {
         let buf = self.make_buf(AmqpBasic::Get(get));
         self.send(IoLoopMessage::Send(buf))?;
         match self.recv()? {
-            ChannelMessage::GetOk(get) => Ok(get),
+            ChannelMessage::GetOk(get) => Ok(*get),
             ChannelMessage::Method(_) | ChannelMessage::ConsumeOk(_, _) => {
                 Err(ErrorKind::FrameUnexpected)?
             }

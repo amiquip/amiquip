@@ -55,7 +55,7 @@ enum IoLoopMessage {
 enum ChannelMessage {
     Method(AMQPClass),
     ConsumeOk(String, CrossbeamReceiver<ConsumerMessage>),
-    GetOk(Option<Get>),
+    GetOk(Box<Option<Get>>),
 }
 
 struct ChannelSlot {
