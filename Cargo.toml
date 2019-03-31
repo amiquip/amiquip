@@ -19,11 +19,12 @@ cookie-factory = "0.2"
 crossbeam-channel = "0.3"
 indexmap = "1.0"
 url = "1.7"
-native-tls = { version = "*", optional = true }
+native-tls = { version = "0.2", optional = true }
 
 [build-dependencies]
 built = "0.3"
 
 [dev-dependencies]
+uuid = { version = "0.7", features = [ "v4" ] }
 env_logger = "0.6"
 mockstream = "0.0.3"
