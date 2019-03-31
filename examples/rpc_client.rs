@@ -23,15 +23,10 @@ impl<'a> FibonacciRpcClient<'a> {
                 ..QueueDeclareOptions::default()
             },
         )?;
-        // Use channel.basic_consume() here instead of queue.consume() so the returned
-        // consumer is tied to the lifetime of the channel instead of the queue.
-        let consumer = channel.basic_consume(
-            queue.name(),
-            ConsumerOptions {
-                no_ack: true,
-                ..ConsumerOptions::default()
-            },
-        )?;
+        let consumer = queue.consume(ConsumerOptions {
+            no_ack: true,
+            ..ConsumerOptions::default()
+        })?;
 
         Ok(FibonacciRpcClient {
             exchange,

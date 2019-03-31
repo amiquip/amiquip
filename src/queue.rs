@@ -74,7 +74,7 @@ pub struct Queue<'a> {
     consumer_count: Option<u32>,
 }
 
-impl Queue<'_> {
+impl<'a> Queue<'a> {
     pub(crate) fn new(
         channel: &Channel,
         name: String,
@@ -136,7 +136,7 @@ impl Queue<'_> {
 
     /// Synchronously start a consumer on this queue.
     #[inline]
-    pub fn consume(&self, options: ConsumerOptions) -> Result<Consumer> {
+    pub fn consume(&self, options: ConsumerOptions) -> Result<Consumer<'a>> {
         self.channel.basic_consume(self.name.clone(), options)
     }
 
