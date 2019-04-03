@@ -166,6 +166,7 @@
 
 mod auth;
 mod channel;
+mod confirm;
 mod connection;
 mod connection_options;
 mod consumer;
@@ -183,6 +184,7 @@ mod stream;
 
 pub use auth::{Auth, Sasl};
 pub use channel::Channel;
+pub use confirm::{Confirm, ConfirmPayload};
 pub use connection::{Connection, ConnectionBlockedNotification, ConnectionTuning};
 pub use connection_options::ConnectionOptions;
 pub use consumer::{Consumer, ConsumerMessage, ConsumerOptions};

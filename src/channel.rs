@@ -1,8 +1,8 @@
 use crate::io_loop::ChannelHandle;
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
 use crate::{
-    Consumer, ConsumerOptions, Delivery, Exchange, ExchangeDeclareOptions, ExchangeType, Get,
-    Publish, Queue, QueueDeclareOptions, QueueDeleteOptions, Result, Return,
+    Confirm, Consumer, ConsumerOptions, Delivery, Exchange, ExchangeDeclareOptions, ExchangeType,
+    Get, Publish, Queue, QueueDeclareOptions, QueueDeleteOptions, Result, Return,
 };
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Get as AmqpGet;
@@ -10,6 +10,9 @@ use amq_protocol::protocol::basic::Publish as AmqpPublish;
 use amq_protocol::protocol::basic::{
     Ack, Cancel, CancelOk, Consume, Nack, Qos, QosOk, Recover, RecoverOk, Reject,
 };
+use amq_protocol::protocol::confirm::AMQPMethod as AmqpConfirm;
+use amq_protocol::protocol::confirm::Select as ConfirmSelect;
+use amq_protocol::protocol::confirm::SelectOk as ConfirmSelectOk;
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::exchange::Bind as ExchangeBind;
 use amq_protocol::protocol::exchange::BindOk as ExchangeBindOk;
@@ -173,6 +176,47 @@ impl Channel {
             AmqpPublish::get_class_id(),
             &publish.properties,
         )
+    }
+
+    /// Open a crossbeam channel to receive publisher confirmations from the server.
+    ///
+    /// You should call this method before either calling
+    /// [`enable_publisher_confirms`](#method.enable_publisher_confirms) or before publishing any
+    /// messages, or you risk missing some confirmations.
+    ///
+    /// The [`Confirm`](enum.Confirm.html) messages sent to this receiver are the raw confirmation
+    /// messages from the server; they may be out of order or be confirms for multiple messages. If
+    /// you want to process perfectly sequential confirmation messages, consider using
+    /// [`ConfirmSmoother`](struct.ConfirmSmoother.html).
+    ///
+    /// There can be only one return listener per channel. If you call this method a second (or
+    /// more) time, the I/O thread will drop the sending side of previously returned channels.
+    ///
+    /// Dropping the `Receiver` returned by this method is harmless. If the I/O loop receives a
+    /// confirmation and there is no listener registered or the previously-registered listener has
+    /// been dropped, it will discard the confirmation
+    pub fn listen_for_publisher_confirms(&self) -> Result<Receiver<Confirm>> {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        self.inner.borrow_mut().set_pub_confirm_handler(Some(tx))?;
+        Ok(rx)
+    }
+
+    /// Synchronously enable [publisher confirms](https://www.rabbitmq.com/confirms.html) on this
+    /// channel. Confirmations will be delivered to the channel registered via
+    /// [`listen_for_publisher_confirms`](#method.listen_for_publisher_confirms).
+    pub fn enable_publisher_confirms(&self) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        inner
+            .call::<_, ConfirmSelectOk>(AmqpConfirm::Select(ConfirmSelect { nowait: false }))
+            .map(|_select_ok| ())
+    }
+
+    /// Asynchronously enable [publisher confirms](https://www.rabbitmq.com/confirms.html) on this
+    /// channel. Confirmations will be delivered to the channel registered via
+    /// [`listen_for_publisher_confirms`](#method.listen_for_publisher_confirms).
+    pub fn enable_publisher_confirms_nowait(&self) -> Result<()> {
+        let mut inner = self.inner.borrow_mut();
+        inner.call_nowait(AmqpConfirm::Select(ConfirmSelect { nowait: true }))
     }
 
     /// Open a crossbeam channel to receive returned messages from the server (i.e., messages

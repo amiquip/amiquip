@@ -1,9 +1,10 @@
-use crate::{ErrorKind, Result, Return};
+use crate::{Confirm, ConfirmPayload, ErrorKind, Result, Return};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::CancelOk;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::channel::CloseOk as ChannelCloseOk;
+use amq_protocol::protocol::confirm::AMQPMethod as AmqpConfirm;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::connection::CloseOk as ConnectionCloseOk;
@@ -84,6 +85,23 @@ fn try_send_return(slot: &mut ChannelSlot, return_: Return) {
         return_
     };
     warn!("discarding returned data {:?}", return_);
+}
+
+// When we set up a pub confirm listener, it's just a crossbeam channel. If it gets dropped,
+// we don't want to error; just start discarding acks/nacks
+fn try_send_confirm(slot: &mut ChannelSlot, confirm: Confirm) {
+    let confirm = if let Some(tx) = &slot.pub_confirm_handler {
+        match tx.try_send(confirm) {
+            Ok(()) => return,
+            Err(TrySendError::Full(confirm)) | Err(TrySendError::Disconnected(confirm)) => {
+                slot.pub_confirm_handler = None;
+                confirm
+            }
+        }
+    } else {
+        confirm
+    };
+    warn!("discarding returned data {:?}", confirm);
 }
 
 // When we set up a blocked connection listener, it's just a crossbeam channel. If it gets
@@ -282,10 +300,29 @@ impl ConnectionState {
                 let slot = slot_get(inner, n)?;
                 send(&slot.tx, Ok(ChannelMessage::GetOk(Box::new(None))))?;
             }
+            // Server ack for publish (publisher confirmation)
+            AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::Ack(ack))) => {
+                let slot = slot_get_mut(inner, n)?;
+                let confirm = ConfirmPayload {
+                    delivery_tag: ack.delivery_tag,
+                    multiple: ack.multiple,
+                };
+                try_send_confirm(slot, Confirm::Ack(confirm));
+            }
+            // Server nack for publish (publisher confirmation)
+            AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::Nack(nack))) => {
+                let slot = slot_get_mut(inner, n)?;
+                let confirm = ConfirmPayload {
+                    delivery_tag: nack.delivery_tag,
+                    multiple: nack.multiple,
+                };
+                try_send_confirm(slot, Confirm::Nack(confirm));
+            }
             // Generic ack messages we send back to the caller.
             AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::QosOk(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::RecoverOk(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Channel(AmqpChannel::OpenOk(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Confirm(AmqpConfirm::SelectOk(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::DeclareOk(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::DeleteOk(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::BindOk(_)))
@@ -305,11 +342,8 @@ impl ConnectionState {
             }
             // Methods we do not handle
             AMQPFrame::Method(n, method @ AMQPClass::Access(_))
-            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Ack(_)))
-            | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Nack(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Channel(AmqpChannel::Flow(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Channel(AmqpChannel::FlowOk(_)))
-            | AMQPFrame::Method(n, method @ AMQPClass::Confirm(_))
             | AMQPFrame::Method(n, method @ AMQPClass::Tx(_)) => {
                 let text = format!(
                     "do not know how to handle channel {} method {:?}",
@@ -326,6 +360,7 @@ impl ConnectionState {
             | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::RecoverAsync(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Basic(AmqpBasic::Reject(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Channel(AmqpChannel::Open(_)))
+            | AMQPFrame::Method(n, method @ AMQPClass::Confirm(AmqpConfirm::Select(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Connection(_))
             | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::Declare(_)))
             | AMQPFrame::Method(n, method @ AMQPClass::Exchange(AmqpExchange::Delete(_)))
