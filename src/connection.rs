@@ -202,10 +202,10 @@ impl Connection {
     /// * `auth_mechanism` (partial); the only allowed value is `external`, and if this query
     /// parameter is given any username or password on the URL will be ignored.
     ///
-    /// Using `amqps` URLs requires amiquip to be built with the `native-tls` feature. The
-    /// TLS-related RabbitMQ query parameters are not supported; use
+    /// Using `amqps` URLs requires amiquip to be built with the `native-tls` feature (which is
+    /// enabled by default). The TLS-related RabbitMQ query parameters are not supported; use
     /// [`open_tls_stream`](#method.open_tls_stream) with a configured `TlsConnector` if you need
-    /// control over the TLS parameters.
+    /// control over the TLS configuration.
     ///
     /// # Examples
     ///
