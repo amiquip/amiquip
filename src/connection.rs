@@ -186,8 +186,9 @@ impl Connection {
     /// parameter is given any username or password on the URL will be ignored.
     ///
     /// Using `amqps` URLs requires amiquip to be built with the `native-tls` feature. The
-    /// TLS-related RabbitMQ query parameters are not supported; use [`open_tls`](#method.open_tls)
-    /// with a configured `TlsConnector` if you need control over the TLS parameters.
+    /// TLS-related RabbitMQ query parameters are not supported; use
+    /// [`open_tls_stream`](#method.open_tls_stream) with a configured `TlsConnector` if you need
+    /// control over the TLS parameters.
     ///
     /// # Examples
     ///
@@ -207,7 +208,7 @@ impl Connection {
     /// // Empty amqp URL is equivalent to default options; handy for initial debugging and
     /// // development.
     /// let conn1 = Connection::open("amqp://")?;
-    /// let conn1 = Connection::open_stream(
+    /// let conn1 = Connection::insecure_open_stream(
     ///     tcp_stream("localhost:5672")?,
     ///     ConnectionOptions::<Auth>::default(),
     ///     ConnectionTuning::default(),
@@ -218,7 +219,7 @@ impl Connection {
     /// let conn3 = Connection::open(
     ///     "amqp://user:pass@example.com:12345/myvhost?heartbeat=30&channel_max=1024&connection_timeout=10000",
     /// )?;
-    /// let conn3 = Connection::open_stream(
+    /// let conn3 = Connection::insecure_open_stream(
     ///     tcp_stream("example.com:12345")?,
     ///     ConnectionOptions::default()
     ///         .auth(Auth::Plain {
@@ -237,25 +238,10 @@ impl Connection {
         self::amqp_url::open(url, tuning)
     }
 
-    /// Open an AMQP connection on a stream (typically a `mio::net::TcpStream`).
-    pub fn open_stream<Auth: Sasl, S: IoStream>(
-        stream: S,
-        options: ConnectionOptions<Auth>,
-        tuning: ConnectionTuning,
-    ) -> Result<Connection> {
-        let io_loop = IoLoop::new(tuning)?;
-        let (join_handle, server_properties, channel0) = io_loop.start(stream, options)?;
-        Ok(Connection {
-            join_handle: Some(join_handle),
-            channel0,
-            server_properties,
-        })
-    }
-
     /// Open an encrypted AMQP connection on a stream (typically a `mio::net::TcpStream`)
     /// using the provided [`TlsConnector`](struct.TlsConnector.html).
     #[cfg(feature = "native-tls")]
-    pub fn open_tls<Auth: Sasl, C: Into<TlsConnector>, S: IoStream>(
+    pub fn open_tls_stream<Auth: Sasl, C: Into<TlsConnector>, S: IoStream>(
         connector: C,
         domain: &str,
         stream: S,
@@ -265,6 +251,24 @@ impl Connection {
         let stream = connector.into().connect(domain, stream)?;
         let io_loop = IoLoop::new(tuning)?;
         let (join_handle, server_properties, channel0) = io_loop.start_tls(stream, options)?;
+        Ok(Connection {
+            join_handle: Some(join_handle),
+            channel0,
+            server_properties,
+        })
+    }
+
+    /// Open an AMQP connection on an insecure stream (typically a `mio::net::TcpStream`).
+    ///
+    /// Consider using [`open_tls_stream`](#method.open_tls_stream) instead, unless you are sure an
+    /// insecure connection is acceptable (e.g., you're connecting to `localhost`).
+    pub fn insecure_open_stream<Auth: Sasl, S: IoStream>(
+        stream: S,
+        options: ConnectionOptions<Auth>,
+        tuning: ConnectionTuning,
+    ) -> Result<Connection> {
+        let io_loop = IoLoop::new(tuning)?;
+        let (join_handle, server_properties, channel0) = io_loop.start(stream, options)?;
         Ok(Connection {
             join_handle: Some(join_handle),
             channel0,
@@ -422,7 +426,7 @@ mod amqp_url {
                 .context(ErrorKind::Io)
                 .map_err(Error::from)
                 .and_then(|stream| {
-                    Connection::open_stream(stream, options.clone(), tuning.clone())
+                    Connection::insecure_open_stream(stream, options.clone(), tuning.clone())
                 });
             match result {
                 Ok(connection) => return Ok(connection),
@@ -457,7 +461,7 @@ mod amqp_url {
                 .context(ErrorKind::Io)
                 .map_err(|err| Error::from(err))
                 .and_then(|stream| {
-                    Connection::open_tls(
+                    Connection::open_tls_stream(
                         connector.clone(),
                         domain,
                         stream,
