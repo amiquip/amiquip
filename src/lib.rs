@@ -184,7 +184,7 @@ mod stream;
 
 pub use auth::{Auth, Sasl};
 pub use channel::Channel;
-pub use confirm::{Confirm, ConfirmPayload};
+pub use confirm::{Confirm, ConfirmPayload, ConfirmSmoother};
 pub use connection::{Connection, ConnectionBlockedNotification, ConnectionTuning};
 pub use connection_options::ConnectionOptions;
 pub use consumer::{Consumer, ConsumerMessage, ConsumerOptions};
