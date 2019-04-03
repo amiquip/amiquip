@@ -2,7 +2,7 @@ use super::{
     ConnectionBlockedNotification, ConsumerMessage, CrossbeamReceiver, IoLoopHandle, IoLoopHandle0,
 };
 use crate::serialize::{IntoAmqpClass, TryFromAmqpClass};
-use crate::{Get, Result, Return};
+use crate::{Confirm, Get, Result, Return};
 use amq_protocol::protocol::basic::Get as AmqpGet;
 use amq_protocol::protocol::basic::{AMQPProperties, Consume};
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
@@ -102,6 +102,14 @@ impl ChannelHandle {
         handler: Option<CrossbeamSender<Return>>,
     ) -> Result<()> {
         self.handle.set_return_handler(handler)
+    }
+
+    #[inline]
+    pub(crate) fn set_pub_confirm_handler(
+        &mut self,
+        handler: Option<CrossbeamSender<Confirm>>,
+    ) -> Result<()> {
+        self.handle.set_pub_confirm_handler(handler)
     }
 
     pub(crate) fn get(&mut self, get: AmqpGet) -> Result<Option<Get>> {

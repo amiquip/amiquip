@@ -2,8 +2,8 @@ use crate::connection_options::ConnectionOptions;
 use crate::frame_buffer::FrameBuffer;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
 use crate::{
-    ConnectionBlockedNotification, ConnectionTuning, ConsumerMessage, ErrorKind, FieldTable, Get,
-    IoStream, Result, Return, Sasl,
+    Confirm, ConnectionBlockedNotification, ConnectionTuning, ConsumerMessage, ErrorKind,
+    FieldTable, Get, IoStream, Result, Return, Sasl,
 };
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
@@ -50,6 +50,7 @@ enum IoLoopMessage {
     Send(OutputBuffer),
     ConnectionClose(OutputBuffer),
     SetReturnHandler(Option<CrossbeamSender<Return>>),
+    SetPubConfirmHandler(Option<CrossbeamSender<Confirm>>),
 }
 
 enum ChannelMessage {
@@ -64,6 +65,7 @@ struct ChannelSlot {
     collector: ContentCollector,
     consumers: HashMap<String, CrossbeamSender<ConsumerMessage>>,
     return_handler: Option<CrossbeamSender<Return>>,
+    pub_confirm_handler: Option<CrossbeamSender<Confirm>>,
 }
 
 impl ChannelSlot {
@@ -87,6 +89,7 @@ impl ChannelSlot {
             collector: ContentCollector::new(channel_id),
             consumers: HashMap::new(),
             return_handler: None,
+            pub_confirm_handler: None,
         };
 
         let loop_handle = IoLoopHandle::new(channel_id, mio_tx, rx);
@@ -526,7 +529,7 @@ impl IoLoop {
                     STREAM,
                     Ready::readable() | Ready::writable(),
                     PollOpt::edge(),
-                    )
+                )
                 .context(ErrorKind::Io)?;
         }
 
@@ -764,6 +767,13 @@ impl Inner {
                 // received a message from this slot.
                 let slot = self.chan_slots.get_mut(channel_id).unwrap();
                 slot.return_handler = handler;
+            }
+            IoLoopMessage::SetPubConfirmHandler(handler) => {
+                assert!(channel_id != 0, "channel 0 cannot have a return handler");
+                // unwrap is safe here, because we can only be called if we just
+                // received a message from this slot.
+                let slot = self.chan_slots.get_mut(channel_id).unwrap();
+                slot.pub_confirm_handler = handler;
             }
         }
         Ok(())

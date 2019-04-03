@@ -1,6 +1,6 @@
 use super::{ChannelMessage, ConnectionBlockedNotification, ConsumerMessage, IoLoopMessage};
 use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass};
-use crate::{AmqpProperties, Error, ErrorKind, Get, Result, Return};
+use crate::{AmqpProperties, Confirm, Error, ErrorKind, Get, Result, Return};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Consume;
 use amq_protocol::protocol::basic::Get as AmqpGet;
@@ -50,6 +50,13 @@ impl IoLoopHandle {
         handler: Option<CrossbeamSender<Return>>,
     ) -> Result<()> {
         self.send(IoLoopMessage::SetReturnHandler(handler))
+    }
+
+    pub(super) fn set_pub_confirm_handler(
+        &mut self,
+        handler: Option<CrossbeamSender<Confirm>>,
+    ) -> Result<()> {
+        self.send(IoLoopMessage::SetPubConfirmHandler(handler))
     }
 
     pub(super) fn get(&mut self, get: AmqpGet) -> Result<Option<Get>> {

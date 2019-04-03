@@ -5,6 +5,7 @@ use amq_protocol::frame::generation::{
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::AMQPProperties;
+use amq_protocol::protocol::confirm::AMQPMethod as AmqpConfirm;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
@@ -95,6 +96,12 @@ impl_try_from_class!(
 );
 
 impl_try_from_class!(
+    amq_protocol::protocol::confirm::SelectOk,
+    AMQPClass::Confirm,
+    AmqpConfirm::SelectOk
+);
+
+impl_try_from_class!(
     amq_protocol::protocol::queue::DeclareOk,
     AMQPClass::Queue,
     AmqpQueue::DeclareOk
@@ -179,6 +186,12 @@ impl IntoAmqpClass for AmqpBasic {
 impl IntoAmqpClass for AmqpChannel {
     fn into_class(self) -> AMQPClass {
         AMQPClass::Channel(self)
+    }
+}
+
+impl IntoAmqpClass for AmqpConfirm {
+    fn into_class(self) -> AMQPClass {
+        AMQPClass::Confirm(self)
     }
 }
 
