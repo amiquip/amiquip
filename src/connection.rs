@@ -162,10 +162,10 @@ impl Drop for Connection {
 }
 
 impl Connection {
-    /// Calls [`open_tuned`](#method.open_tuned) with default
+    /// Calls [`insecure_open_tuned`](#method.insecure_open_tuned) with default
     /// [`ConnectionTuning`](struct.ConnectionTuning.html) settings.
-    pub fn open(url: &str) -> Result<Connection> {
-        Self::open_tuned(url, ConnectionTuning::default())
+    pub fn insecure_open(url: &str) -> Result<Connection> {
+        Self::insecure_open_tuned(url, ConnectionTuning::default())
     }
 
     /// Open an AMQP connection from an `amqp://...` or `amqps://...` URL. Mostly follows the
@@ -207,7 +207,7 @@ impl Connection {
     /// # fn open_examples() -> Result<()> {
     /// // Empty amqp URL is equivalent to default options; handy for initial debugging and
     /// // development.
-    /// let conn1 = Connection::open("amqp://")?;
+    /// let conn1 = Connection::insecure_open("amqp://")?;
     /// let conn1 = Connection::insecure_open_stream(
     ///     tcp_stream("localhost:5672")?,
     ///     ConnectionOptions::<Auth>::default(),
@@ -216,7 +216,7 @@ impl Connection {
     ///
     /// // All possible options specified in the URL except auth_mechanism=external (which would
     /// // override the username and password).
-    /// let conn3 = Connection::open(
+    /// let conn3 = Connection::insecure_open(
     ///     "amqp://user:pass@example.com:12345/myvhost?heartbeat=30&channel_max=1024&connection_timeout=10000",
     /// )?;
     /// let conn3 = Connection::insecure_open_stream(
@@ -234,7 +234,7 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn open_tuned(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
+    pub fn insecure_open_tuned(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
         self::amqp_url::open(url, tuning)
     }
 

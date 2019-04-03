@@ -11,7 +11,7 @@ fn main() -> Result<()> {
     env_logger::init();
 
     // Open connection.
-    let mut connection = Connection::open("amqp://guest:guest@localhost:5672")?;
+    let mut connection = Connection::insecure_open("amqp://guest:guest@localhost:5672")?;
 
     // Open a channel - None says let the library choose the channel ID.
     let channel = connection.open_channel(None)?;

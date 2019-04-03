@@ -75,7 +75,7 @@ fn use_connection(connection: &mut Connection) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let mut connection = Connection::open("amqp://guest:guest@localhost:5672")?;
+    let mut connection = Connection::insecure_open("amqp://guest:guest@localhost:5672")?;
 
     let result = use_connection(&mut connection);
 
