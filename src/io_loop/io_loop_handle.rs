@@ -11,13 +11,21 @@ use crossbeam_channel::Receiver as CrossbeamReceiver;
 use crossbeam_channel::Sender as CrossbeamSender;
 use log::error;
 use mio_extras::channel::SyncSender as MioSyncSender;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
+use std::result::Result as StdResult;
 
 pub(super) struct IoLoopHandle {
     channel_id: u16,
     buf: OutputBuffer,
     tx: MioSyncSender<IoLoopMessage>,
     rx: CrossbeamReceiver<Result<ChannelMessage>>,
+}
+
+impl fmt::Debug for IoLoopHandle {
+    fn fmt(&self, f: &mut fmt::Formatter) -> StdResult<(), fmt::Error> {
+        write!(f, "IoLoopHandle {{ channel_id: {}, .. }}", self.channel_id)
+    }
 }
 
 impl IoLoopHandle {
@@ -168,6 +176,13 @@ pub(super) struct IoLoopHandle0 {
     alloc_chan_req_tx: MioSyncSender<Option<u16>>,
     alloc_chan_rep_rx: CrossbeamReceiver<Result<IoLoopHandle>>,
 }
+
+impl fmt::Debug for IoLoopHandle0 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> StdResult<(), fmt::Error> {
+        write!(f, "IoLoopHandle0 {{ .. }}")
+    }
+}
+
 
 impl IoLoopHandle0 {
     pub(super) fn new(

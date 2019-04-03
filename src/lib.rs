@@ -6,14 +6,19 @@
 //! Most errors, however, do result in effectively killing the channel or connection on which they
 //! occur.
 //!
-//! TLS support is optionally available via the [native-tls](https://crates.io/crates/native-tls)
-//! crate. To enable TLS support, turn on the `native-tls` feature of amiquip; e.g.,
+//! TLS support is enabled by default via the [native-tls](https://crates.io/crates/native-tls)
+//! crate. To enable disable TLS support at build time, disable amiquip's default features:
 //!
 //! ```toml
-//! # Cargo.toml
 //! [dependencies]
-//! amiquip = { version = "0.1", features = ["native-tls"] }
+//! amiquip = { version = "0.1", default-features = false }
 //! ```
+//!
+//! If you disable TLS support, the methods `Connection::open`, `Connection::open_tuned`, and
+//! `Connection::open_tls_stream` will no longer be available, as all three only allow secure
+//! connections. The methods `Connection::insecure_open`, `Connection::insecure_open_tuned`, and
+//! `Connection::insecure_open_stream` will still be available, as these methods support
+//! unencrypted connections.
 //!
 //! # Examples
 //!
@@ -24,7 +29,7 @@
 //!
 //! fn main() -> Result<()> {
 //!     // Open connection.
-//!     let mut connection = Connection::open("amqp://guest:guest@localhost:5672")?;
+//!     let mut connection = Connection::insecure_open("amqp://guest:guest@localhost:5672")?;
 //!
 //!     // Open a channel - None says let the library choose the channel ID.
 //!     let channel = connection.open_channel(None)?;
@@ -48,7 +53,7 @@
 //!
 //! fn main() -> Result<()> {
 //!     // Open connection.
-//!     let mut connection = Connection::open("amqp://guest:guest@localhost:5672")?;
+//!     let mut connection = Connection::insecure_open("amqp://guest:guest@localhost:5672")?;
 //!
 //!     // Open a channel - None says let the library choose the channel ID.
 //!     let channel = connection.open_channel(None)?;

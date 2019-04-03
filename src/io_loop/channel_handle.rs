@@ -21,6 +21,7 @@ use std::fmt::Debug;
 // bytes.
 const FRAME_OVERHEAD: usize = 8;
 
+#[derive(Debug)]
 pub(crate) struct Channel0Handle {
     handle: IoLoopHandle0,
     frame_max: usize,

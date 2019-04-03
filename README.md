@@ -19,15 +19,23 @@ amiquip = "0.1"
 For usage, see the [documentation](https://docs.rs/amiquip/) and
 [examples](https://github.com/jgallagher/amiquip/tree/master/examples).
 
-## Feature `native-tls`
+## TLS Support
 
-By default, amiquip cannot use a TLS connection. To enable TLS connections, use
-the `native-tls` feature:
+By default, amiquip enables TLS support via the
+[native-tls](https://crates.io/crates/native-tls) crate. You can disable
+support for TLS by turning off default features:
 
 ```toml
 [dependencies]
-amiquip = { version = "0.1", features = ["native_tls"] }
+amiquip = { version = "0.1", default-features = false }
 ```
+
+If you disable TLS support, the methods `Connection::open`,
+`Connection::open_tuned`, and `Connection::open_tls_stream` will no longer be
+available, as all three only allow secure connections. The methods
+`Connection::insecure_open`, `Connection::insecure_open_tuned`, and
+`Connection::insecure_open_stream` will still be available; these methods
+support unencrypted connections.
 
 # License
 

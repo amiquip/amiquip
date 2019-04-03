@@ -149,6 +149,7 @@ impl ConnectionTuning {
 /// not `Sync`. After opening a connection one thread, you are free to create any number of
 /// channels and send them to other threads for use. However, they are all tied back to the
 /// original connection; when it is closed or dropped, future operations on them will fail.
+#[derive(Debug)]
 pub struct Connection {
     join_handle: Option<JoinHandle<Result<()>>>,
     channel0: Channel0Handle,
@@ -164,8 +165,24 @@ impl Drop for Connection {
 impl Connection {
     /// Calls [`open_tuned`](#method.open_tuned) with default
     /// [`ConnectionTuning`](struct.ConnectionTuning.html) settings.
+    #[cfg(feature = "native-tls")]
     pub fn open(url: &str) -> Result<Connection> {
         Self::open_tuned(url, ConnectionTuning::default())
+    }
+
+    /// Equivalent to [`insecure_open_tuned`](#method.insecure_open_tuned), except
+    /// only secure URLs (`amqps://...`) are allowed. Calling this method with an insecure
+    /// (`amqp://...`) URL will return an error with [kind
+    /// `InsecureUrl`](enum.ErrorKind.html#variant.InsecureUrl).
+    #[cfg(feature = "native-tls")]
+    pub fn open_tuned(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
+        self::amqp_url::open(url, tuning, false)
+    }
+
+    /// Calls [`insecure_open_tuned`](#method.insecure_open_tuned) with default
+    /// [`ConnectionTuning`](struct.ConnectionTuning.html) settings.
+    pub fn insecure_open(url: &str) -> Result<Connection> {
+        Self::insecure_open_tuned(url, ConnectionTuning::default())
     }
 
     /// Open an AMQP connection from an `amqp://...` or `amqps://...` URL. Mostly follows the
@@ -185,9 +202,10 @@ impl Connection {
     /// * `auth_mechanism` (partial); the only allowed value is `external`, and if this query
     /// parameter is given any username or password on the URL will be ignored.
     ///
-    /// Using `amqps` URLs requires amiquip to be built with the `native-tls` feature. The
-    /// TLS-related RabbitMQ query parameters are not supported; use [`open_tls`](#method.open_tls)
-    /// with a configured `TlsConnector` if you need control over the TLS parameters.
+    /// Using `amqps` URLs requires amiquip to be built with the `native-tls` feature (which is
+    /// enabled by default). The TLS-related RabbitMQ query parameters are not supported; use
+    /// [`open_tls_stream`](#method.open_tls_stream) with a configured `TlsConnector` if you need
+    /// control over the TLS configuration.
     ///
     /// # Examples
     ///
@@ -206,8 +224,8 @@ impl Connection {
     /// # fn open_examples() -> Result<()> {
     /// // Empty amqp URL is equivalent to default options; handy for initial debugging and
     /// // development.
-    /// let conn1 = Connection::open("amqp://")?;
-    /// let conn1 = Connection::open_stream(
+    /// let conn1 = Connection::insecure_open("amqp://")?;
+    /// let conn1 = Connection::insecure_open_stream(
     ///     tcp_stream("localhost:5672")?,
     ///     ConnectionOptions::<Auth>::default(),
     ///     ConnectionTuning::default(),
@@ -215,10 +233,10 @@ impl Connection {
     ///
     /// // All possible options specified in the URL except auth_mechanism=external (which would
     /// // override the username and password).
-    /// let conn3 = Connection::open(
+    /// let conn3 = Connection::insecure_open(
     ///     "amqp://user:pass@example.com:12345/myvhost?heartbeat=30&channel_max=1024&connection_timeout=10000",
     /// )?;
-    /// let conn3 = Connection::open_stream(
+    /// let conn3 = Connection::insecure_open_stream(
     ///     tcp_stream("example.com:12345")?,
     ///     ConnectionOptions::default()
     ///         .auth(Auth::Plain {
@@ -233,29 +251,14 @@ impl Connection {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn open_tuned(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
-        self::amqp_url::open(url, tuning)
-    }
-
-    /// Open an AMQP connection on a stream (typically a `mio::net::TcpStream`).
-    pub fn open_stream<Auth: Sasl, S: IoStream>(
-        stream: S,
-        options: ConnectionOptions<Auth>,
-        tuning: ConnectionTuning,
-    ) -> Result<Connection> {
-        let io_loop = IoLoop::new(tuning)?;
-        let (join_handle, server_properties, channel0) = io_loop.start(stream, options)?;
-        Ok(Connection {
-            join_handle: Some(join_handle),
-            channel0,
-            server_properties,
-        })
+    pub fn insecure_open_tuned(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
+        self::amqp_url::open(url, tuning, true)
     }
 
     /// Open an encrypted AMQP connection on a stream (typically a `mio::net::TcpStream`)
     /// using the provided [`TlsConnector`](struct.TlsConnector.html).
     #[cfg(feature = "native-tls")]
-    pub fn open_tls<Auth: Sasl, C: Into<TlsConnector>, S: IoStream>(
+    pub fn open_tls_stream<Auth: Sasl, C: Into<TlsConnector>, S: IoStream>(
         connector: C,
         domain: &str,
         stream: S,
@@ -265,6 +268,24 @@ impl Connection {
         let stream = connector.into().connect(domain, stream)?;
         let io_loop = IoLoop::new(tuning)?;
         let (join_handle, server_properties, channel0) = io_loop.start_tls(stream, options)?;
+        Ok(Connection {
+            join_handle: Some(join_handle),
+            channel0,
+            server_properties,
+        })
+    }
+
+    /// Open an AMQP connection on an insecure stream (typically a `mio::net::TcpStream`).
+    ///
+    /// Consider using [`open_tls_stream`](#method.open_tls_stream) instead, unless you are sure an
+    /// insecure connection is acceptable (e.g., you're connecting to `localhost`).
+    pub fn insecure_open_stream<Auth: Sasl, S: IoStream>(
+        stream: S,
+        options: ConnectionOptions<Auth>,
+        tuning: ConnectionTuning,
+    ) -> Result<Connection> {
+        let io_loop = IoLoop::new(tuning)?;
+        let (join_handle, server_properties, channel0) = io_loop.start(stream, options)?;
         Ok(Connection {
             join_handle: Some(join_handle),
             channel0,
@@ -400,13 +421,19 @@ mod amqp_url {
     use std::time::Duration;
     use url::{percent_encoding, Url};
 
-    pub fn open(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
+    pub fn open(url: &str, tuning: ConnectionTuning, allow_insecure: bool) -> Result<Connection> {
         let mut url = Url::parse(url)?;
         let scheme = populate_host_and_port(&mut url)?;
         let options = decode(&url)?;
 
         match scheme {
-            Scheme::Amqp => open_amqp(url, options, tuning),
+            Scheme::Amqp => {
+                if allow_insecure {
+                    open_amqp(url, options, tuning)
+                } else {
+                    Err(ErrorKind::InsecureUrl)?
+                }
+            }
             Scheme::Amqps => open_amqps(url, options, tuning),
         }
     }
@@ -422,7 +449,7 @@ mod amqp_url {
                 .context(ErrorKind::Io)
                 .map_err(Error::from)
                 .and_then(|stream| {
-                    Connection::open_stream(stream, options.clone(), tuning.clone())
+                    Connection::insecure_open_stream(stream, options.clone(), tuning.clone())
                 });
             match result {
                 Ok(connection) => return Ok(connection),
@@ -457,7 +484,7 @@ mod amqp_url {
                 .context(ErrorKind::Io)
                 .map_err(|err| Error::from(err))
                 .and_then(|stream| {
-                    Connection::open_tls(
+                    Connection::open_tls_stream(
                         connector.clone(),
                         domain,
                         stream,
@@ -573,6 +600,13 @@ mod amqp_url {
 
         fn decode_s(s: &str) -> Result<ConnectionOptions<Auth>> {
             decode(&Url::parse(s).unwrap())
+        }
+
+        #[test]
+        #[cfg(feature = "native-tls")]
+        fn open_rejects_amqp_urls() {
+            let result = Connection::open("amqp://localhost/");
+            assert_eq!(*result.unwrap_err().kind(), ErrorKind::InsecureUrl);
         }
 
         #[test]
