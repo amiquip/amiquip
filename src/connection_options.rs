@@ -19,6 +19,8 @@ use std::time::Duration;
 ///     .channel_max(0)
 ///     .frame_max(0)
 ///     .heartbeat(60)
+///     .connection_timeout(None)
+///     .information(None)
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +32,7 @@ pub struct ConnectionOptions<Auth: Sasl> {
     pub(crate) frame_max: u32,
     pub(crate) heartbeat: u16,
     pub(crate) connection_timeout: Option<Duration>,
+    information: Option<String>,
 }
 
 impl<Auth: Sasl> Default for ConnectionOptions<Auth> {
@@ -43,6 +46,7 @@ impl<Auth: Sasl> Default for ConnectionOptions<Auth> {
             frame_max: 0,
             heartbeat: 60,
             connection_timeout: None,
+            information: None,
         }
     }
 }
@@ -104,7 +108,20 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
     /// Sets the timeout for the initial TCP connection. If None (the default), there is no
     /// timeout.
     pub fn connection_timeout(self, connection_timeout: Option<Duration>) -> Self {
-        ConnectionOptions { connection_timeout, ..self }
+        ConnectionOptions {
+            connection_timeout,
+            ..self
+        }
+    }
+
+    /// Sets the "information" string reported during handshaking to the server. This string
+    /// is displayed in the RabbitMQ management interface under "Client properties" of a
+    /// connection.
+    pub fn information(self, information: Option<String>) -> Self {
+        ConnectionOptions {
+            information,
+            ..self
+        }
     }
 
     pub(crate) fn make_start_ok(&self, start: Start) -> Result<(StartOk, FieldTable)> {
@@ -126,20 +143,22 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
 
         // bundle up info about this crate as client properties
         let mut client_properties = FieldTable::new();
-        let mut set_prop = |k: &str, v: &str| {
-            client_properties.insert(k.to_string(), AMQPValue::LongString(v.to_string()));
+        let mut set_prop = |k: &str, v: String| {
+            client_properties.insert(k.to_string(), AMQPValue::LongString(v));
         };
-        set_prop("product", crate::built_info::PKG_NAME);
-        set_prop("version", crate::built_info::PKG_VERSION);
-        set_prop("platform", crate::built_info::CFG_OS);
-        client_properties.insert(
-            "information".to_string(),
-            AMQPValue::LongString(format!(
-                "built by {} at {}",
-                crate::built_info::RUSTC_VERSION,
-                crate::built_info::BUILT_TIME_UTC
-            )),
+        set_prop("product", crate::built_info::PKG_NAME.to_string());
+        set_prop("version", crate::built_info::PKG_VERSION.to_string());
+        set_prop(
+            "platform",
+            format!(
+                "{} / {}",
+                crate::built_info::CFG_OS,
+                crate::built_info::RUSTC_VERSION
+            ),
         );
+        if let Some(information) = &self.information {
+            set_prop("information", information.to_string());
+        }
         let mut capabilities = FieldTable::new();
         let mut set_cap = |k: &str| {
             capabilities.insert(k.to_string(), AMQPValue::Boolean(true));
