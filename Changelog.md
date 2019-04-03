@@ -1,4 +1,4 @@
-# Version UPCOMING
+# Version 0.2 (2019-04-03)
 
 * Added support for publisher confirms
 * Added `ConnectionOptions::information` for specifying the informational string amiquip reports to the server upon connection

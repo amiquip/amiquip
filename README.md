@@ -13,7 +13,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-amiquip = "0.1"
+amiquip = "0.2"
 ```
 
 For usage, see the [documentation](https://docs.rs/amiquip/) and
@@ -27,7 +27,7 @@ support for TLS by turning off default features:
 
 ```toml
 [dependencies]
-amiquip = { version = "0.1", default-features = false }
+amiquip = { version = "0.2", default-features = false }
 ```
 
 If you disable TLS support, the methods `Connection::open`,
