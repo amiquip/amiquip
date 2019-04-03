@@ -51,6 +51,11 @@ pub enum ErrorKind {
     #[fail(display = "invalid url: {}", _0)]
     InvalidUrl(Url),
 
+    /// An insecure URL was supplied to [`Connection::open`](struct.Connection.html#method.open),
+    /// which only allows `amqps://...` URLs.
+    #[fail(display = "insecure URL passed to method that only allows secure connections")]
+    InsecureUrl,
+
     /// The underlying socket was closed.
     #[fail(display = "underlying socket closed unexpectedly")]
     UnexpectedSocketClose,

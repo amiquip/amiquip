@@ -149,6 +149,7 @@ impl ConnectionTuning {
 /// not `Sync`. After opening a connection one thread, you are free to create any number of
 /// channels and send them to other threads for use. However, they are all tied back to the
 /// original connection; when it is closed or dropped, future operations on them will fail.
+#[derive(Debug)]
 pub struct Connection {
     join_handle: Option<JoinHandle<Result<()>>>,
     channel0: Channel0Handle,
@@ -162,6 +163,22 @@ impl Drop for Connection {
 }
 
 impl Connection {
+    /// Calls [`open_tuned`](#method.open_tuned) with default
+    /// [`ConnectionTuning`](struct.ConnectionTuning.html) settings.
+    #[cfg(feature = "native-tls")]
+    pub fn open(url: &str) -> Result<Connection> {
+        Self::open_tuned(url, ConnectionTuning::default())
+    }
+
+    /// Equivalent to [`insecure_open_tuned`](#method.insecure_open_tuned), except
+    /// only secure URLs (`amqps://...`) are allowed. Calling this method with an insecure
+    /// (`amqp://...`) URL will return an error with [kind
+    /// `InsecureUrl`](enum.ErrorKind.html#variant.InsecureUrl).
+    #[cfg(feature = "native-tls")]
+    pub fn open_tuned(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
+        self::amqp_url::open(url, tuning, false)
+    }
+
     /// Calls [`insecure_open_tuned`](#method.insecure_open_tuned) with default
     /// [`ConnectionTuning`](struct.ConnectionTuning.html) settings.
     pub fn insecure_open(url: &str) -> Result<Connection> {
@@ -235,7 +252,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn insecure_open_tuned(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
-        self::amqp_url::open(url, tuning)
+        self::amqp_url::open(url, tuning, true)
     }
 
     /// Open an encrypted AMQP connection on a stream (typically a `mio::net::TcpStream`)
@@ -404,13 +421,19 @@ mod amqp_url {
     use std::time::Duration;
     use url::{percent_encoding, Url};
 
-    pub fn open(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
+    pub fn open(url: &str, tuning: ConnectionTuning, allow_insecure: bool) -> Result<Connection> {
         let mut url = Url::parse(url)?;
         let scheme = populate_host_and_port(&mut url)?;
         let options = decode(&url)?;
 
         match scheme {
-            Scheme::Amqp => open_amqp(url, options, tuning),
+            Scheme::Amqp => {
+                if allow_insecure {
+                    open_amqp(url, options, tuning)
+                } else {
+                    Err(ErrorKind::InsecureUrl)?
+                }
+            }
             Scheme::Amqps => open_amqps(url, options, tuning),
         }
     }
@@ -577,6 +600,13 @@ mod amqp_url {
 
         fn decode_s(s: &str) -> Result<ConnectionOptions<Auth>> {
             decode(&Url::parse(s).unwrap())
+        }
+
+        #[test]
+        #[cfg(feature = "native-tls")]
+        fn open_rejects_amqp_urls() {
+            let result = Connection::open("amqp://localhost/");
+            assert_eq!(*result.unwrap_err().kind(), ErrorKind::InsecureUrl);
         }
 
         #[test]
