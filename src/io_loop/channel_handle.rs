@@ -174,11 +174,14 @@ impl ChannelHandle {
             self.handle.send_content_body(&content[..self.frame_max])?;
             content = &content[self.frame_max..];
         }
-        trace!(
-            "sending final content body frame on channel {} (len = {})",
-            self.channel_id(),
-            content.len()
-        );
-        self.handle.send_content_body(content)
+        if content.len() > 0 {
+            trace!(
+                "sending final content body frame on channel {} (len = {})",
+                self.channel_id(),
+                content.len()
+            );
+            self.handle.send_content_body(content)?;
+        }
+        Ok(())
     }
 }
