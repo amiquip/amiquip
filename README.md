@@ -37,6 +37,28 @@ available, as all three only allow secure connections. The methods
 `Connection::insecure_open_stream` will still be available; these methods
 support unencrypted connections.
 
+## Integration Tests
+
+amiquip contains integration tests that require a RabbitMQ server. To run these,
+set the `AMIQUIP_TEST_URL` environment variable to an `amqp://` or `amqps://` URL
+before running `cargo test`. For example, if you have a RabbitMQ instance running
+with the default guest account on your development machine:
+
+```
+bash$ AMIQUIP_TEST_URL=amqp://guest:guest@localhost cargo test
+```
+
+If the `AMIQUIP_TEST_URL` environment variable is not set, all integration tests
+will be skipped (and silently pass). If you run with `--nocapture`, you will see
+a warning printed on the first such skipped test:
+
+```
+bash$ cargo test -- nocapture
+...
+test integration_tests::exchange::test_declare ... AMIQUIP_TEST_URL not defined - skipping integration tests
+...
+```
+
 # License
 
 This project is licensed under either of

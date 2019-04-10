@@ -212,3 +212,6 @@ pub use amq_protocol::types::FieldTable;
 mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
+
+#[cfg(test)]
+mod integration_tests;

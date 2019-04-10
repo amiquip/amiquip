@@ -507,8 +507,8 @@ impl Channel {
         let exchange = exchange.into();
         let declare =
             AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), false, true));
-        self.call::<_, ExchangeDeclareOk>(declare)
-            .map(|_ok| Exchange::new(self, exchange))
+        self.call_nowait(declare)
+            .map(|()| Exchange::new(self, exchange))
     }
 
     /// Passively declare that a exchange exists. This asks the server to confirm that a exchange
@@ -526,8 +526,8 @@ impl Channel {
         };
         let declare =
             AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), true, false));
-        self.call_nowait(declare)
-            .map(|()| Exchange::new(self, exchange))
+        self.call::<_, ExchangeDeclareOk>(declare)
+            .map(|_ok| Exchange::new(self, exchange))
     }
 
     /// Synchronously bind an exchange to an exchange with the given routing key and arguments.
