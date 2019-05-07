@@ -175,7 +175,7 @@ impl IoLoop {
             .register(
                 &stream,
                 STREAM,
-                Ready::readable() | Ready::writable(),
+                Ready::writable(),
                 PollOpt::edge(),
             )
             .context(ErrorKind::Io)?;
@@ -186,7 +186,7 @@ impl IoLoop {
 
         let join_handle = Builder::new()
             .name("amiquip-io".to_string())
-            .spawn(move || self.thread_main(stream, options, handshake_done_tx, ch0_slot))
+            .spawn(move || self.thread_main(stream, options, handshake_done_tx, ch0_slot, false))
             .context(ErrorKind::ForkFailed)?;
 
         IoLoop::wait_for_amqp_handshake(ch0_handle, join_handle, handshake_done_rx)
@@ -254,7 +254,7 @@ impl IoLoop {
         trace!("starting TLS handshake");
         let stream = self.run_tls_handshake(stream)?;
         trace!("finished TLS handshake");
-        self.thread_main(stream, options, handshake_done_tx, ch0_slot)
+        self.thread_main(stream, options, handshake_done_tx, ch0_slot, true)
     }
 
     #[cfg(feature = "native-tls")]
@@ -269,6 +269,7 @@ impl IoLoop {
                 }
                 Ok(())
             },
+            false,
             |_, state| state.is_some(),
         )?;
         Ok(state.unwrap())
@@ -280,6 +281,7 @@ impl IoLoop {
         options: ConnectionOptions<Auth>,
         handshake_done_tx: crossbeam_channel::Sender<(usize, FieldTable)>,
         ch0_slot: Channel0Slot,
+        have_written_to_socket: bool,
     ) -> Result<()> {
         self.poll
             .register(
@@ -305,7 +307,7 @@ impl IoLoop {
                 PollOpt::edge(),
             )
             .context(ErrorKind::Io)?;
-        let (tune_ok, server_properties) = self.run_amqp_handshake(&mut stream, options)?;
+        let (tune_ok, server_properties) = self.run_amqp_handshake(&mut stream, options, have_written_to_socket)?;
         let channel_max = tune_ok.channel_max;
         match handshake_done_tx.send((tune_ok.frame_max as usize, server_properties)) {
             Ok(_) => (),
@@ -319,12 +321,14 @@ impl IoLoop {
         &mut self,
         stream: &mut S,
         options: ConnectionOptions<Auth>,
+        have_written_to_socket: bool,
     ) -> Result<(TuneOk, FieldTable)> {
         let mut state = HandshakeState::Start(options);
         let result = self.run_io_loop(
             stream,
             &mut state,
             Self::handle_handshake_event,
+            have_written_to_socket,
             Self::is_handshake_done,
         );
         match result {
@@ -409,6 +413,7 @@ impl IoLoop {
             stream,
             &mut state,
             Self::handle_steady_event,
+            true,
             Self::is_connection_done,
         )?;
         match state {
@@ -509,6 +514,7 @@ impl IoLoop {
         stream: &mut S,
         state: &mut State,
         mut handle_event: F,
+        mut have_written_to_socket: bool,
         is_done: G,
     ) -> Result<()>
     where
@@ -521,7 +527,15 @@ impl IoLoop {
         // R at entry. Check and see if we have any outgoing data to send (e.g., done
         // with TLS handshake and need to send the AMQP protocol header), and reregister
         // for RW if so.
-        if self.inner.has_data_to_write() {
+        //
+        // HOWEVER - on Windows, it's important not to reregister for readable until we've
+        // written some data on the socket; otherwise we can get spurious readable wakeups
+        // which lead to a NotConnected error when we try to actually read. have_written_to_socket
+        // lets us track this. In the TLS case, this should be false if we're just starting
+        // the TLS handshake and true otherwise; in the non-TLS case, this should be true
+        // if we've sent the protocol header and false otherwise. I think this is related to
+        // https://github.com/tokio-rs/mio/issues/648.
+        if self.inner.has_data_to_write() && have_written_to_socket {
             trace!("reregistering socket for readable or writable");
             self.poll
                 .reregister(
@@ -584,7 +598,7 @@ impl IoLoop {
             // If we don't have data to write, only reregister for readable (without
             // writable) if we had data to write after the last poll; otherwise we know
             // we were already registered as readable only and don't need to rereg.
-            if self.inner.has_data_to_write() {
+            if self.inner.has_data_to_write() && have_written_to_socket {
                 trace!("reregistering socket for readable or writable");
                 self.poll
                     .reregister(
@@ -596,6 +610,7 @@ impl IoLoop {
                     .context(ErrorKind::Io)?;
             } else if had_data_to_write {
                 trace!("reregistering socket for readable only");
+                have_written_to_socket = true;
                 self.poll
                     .reregister(stream, STREAM, Ready::readable(), PollOpt::edge())
                     .context(ErrorKind::Io)?;
