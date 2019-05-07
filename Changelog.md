@@ -1,3 +1,8 @@
+# Version 0.2.2 (2019-05-07)
+
+* Modify how we register the mio socket to avoid getting spurious wakeups before
+  the socket is actually connected on Windows (hopefully fixes #8).
+
 # Version 0.2.1 (2019-04-09)
 
 * Fix bug when publishing a message with length 0 (or exactly equal to a
