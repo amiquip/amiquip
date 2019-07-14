@@ -1,3 +1,7 @@
+# Version UPCOMING
+
+* Add missing `Debug`, `Clone`, `Copy`, and/or `Default` derivations for `ExchangeType`, `Publish`, and `QueueDeleteOption`.
+
 # Version 0.2.2 (2019-05-07)
 
 * Modify how we register the mio socket to avoid getting spurious wakeups before

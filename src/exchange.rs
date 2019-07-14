@@ -2,6 +2,7 @@ use crate::{AmqpProperties, Channel, FieldTable, Result};
 use amq_protocol::protocol::exchange::Declare;
 
 /// Types of AMQP exchanges.
+#[derive(Debug, Clone)]
 pub enum ExchangeType {
     /// Direct exchange; delivers messages to queues based on the routing key.
     Direct,
@@ -80,6 +81,7 @@ impl ExchangeDeclareOptions {
 }
 
 /// Wrapper for a message to be published.
+#[derive(Debug, Clone)]
 pub struct Publish<'a> {
     /// Body of content to send.
     pub body: &'a [u8],
