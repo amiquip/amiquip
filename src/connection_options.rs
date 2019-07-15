@@ -1,4 +1,5 @@
-use crate::{ErrorKind, Result, Sasl};
+use crate::errors::*;
+use crate::Sasl;
 use amq_protocol::protocol::connection::{Open, Start, StartOk, Tune, TuneOk};
 use amq_protocol::protocol::constants::FRAME_MIN_SIZE;
 use amq_protocol::types::{AMQPValue, FieldTable};
@@ -133,12 +134,18 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         // ensure our requested auth mechanism and locale are available
         let mechanism = self.auth.mechanism();
         if !server_supports(&start.mechanisms, &mechanism) {
-            return Err(ErrorKind::UnsupportedAuthMechanism(
-                start.mechanisms.clone(),
-            ))?;
+            return UnsupportedAuthMechanism {
+                available: start.mechanisms.clone(),
+                requested: mechanism,
+            }
+            .fail();
         }
         if !server_supports(&start.locales, &self.locale) {
-            return Err(ErrorKind::UnsupportedLocale(start.locales.clone()))?;
+            return UnsupportedLocale {
+                available: start.locales.clone(),
+                requested: self.locale.clone(),
+            }
+            .fail();
         }
 
         // bundle up info about this crate as client properties
@@ -206,7 +213,11 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         let heartbeat = u16::min(tune.heartbeat, self.heartbeat);
 
         if frame_max < u32::from(FRAME_MIN_SIZE) {
-            return Err(ErrorKind::FrameMaxTooSmall(u32::from(FRAME_MIN_SIZE)))?;
+            return FrameMaxTooSmall {
+                min: u32::from(FRAME_MIN_SIZE),
+                requested: frame_max,
+            }
+            .fail();
         }
 
         Ok(TuneOk {
@@ -281,10 +292,10 @@ mod tests {
 
         let res = options.make_start_ok(start);
         assert!(res.is_err());
-        assert_eq!(
-            *res.unwrap_err().kind(),
-            ErrorKind::UnsupportedAuthMechanism(server_mechanisms.to_string())
-        );
+        match res.unwrap_err() {
+            Error::UnsupportedAuthMechanism { .. } => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 
     #[test]
@@ -303,10 +314,10 @@ mod tests {
 
         let res = options.make_start_ok(start);
         assert!(res.is_err());
-        assert_eq!(
-            *res.unwrap_err().kind(),
-            ErrorKind::UnsupportedLocale(server_locales.to_string())
-        );
+        match res.unwrap_err() {
+            Error::UnsupportedLocale { .. } => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 
     #[test]
@@ -322,9 +333,9 @@ mod tests {
 
         let res = options.make_tune_ok(tune);
         assert!(res.is_err());
-        assert_eq!(
-            *res.unwrap_err().kind(),
-            ErrorKind::FrameMaxTooSmall(u32::from(FRAME_MIN_SIZE))
-        );
+        match res.unwrap_err() {
+            Error::FrameMaxTooSmall { .. } => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 }

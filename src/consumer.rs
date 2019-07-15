@@ -1,4 +1,5 @@
-use crate::{Channel, Delivery, ErrorKind, FieldTable, Result};
+use crate::errors::*;
+use crate::{Channel, Delivery, FieldTable};
 use crossbeam_channel::Receiver;
 use std::cell::Cell;
 
@@ -30,7 +31,7 @@ pub struct ConsumerOptions {
 // Clippy warns about ConsumerMessage::Delivery being much larger than the other variants, but we
 // expect almost all instances of ConsumerMessage to be Deliveries.
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum ConsumerMessage {
     /// A delivered message.
     Delivery(Delivery),
@@ -47,13 +48,13 @@ pub enum ConsumerMessage {
     ClientClosedChannel,
 
     /// The server has closed the channel where this consumer was created.
-    ServerClosedChannel(ErrorKind),
+    ServerClosedChannel(Error),
 
     /// The client has closed the connection where this consumer was created.
     ClientClosedConnection,
 
     /// The server has closed the connection where this consumer was created.
-    ServerClosedConnection(ErrorKind),
+    ServerClosedConnection(Error),
 }
 
 /// A message consumer associated with an AMQP queue.

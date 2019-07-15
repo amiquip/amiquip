@@ -1,4 +1,5 @@
-use crate::{Confirm, ConfirmPayload, ErrorKind, Result, Return};
+use crate::errors::*;
+use crate::{Confirm, ConfirmPayload, Return};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::CancelOk;
@@ -12,8 +13,8 @@ use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::{AMQPClass, AMQPHardError};
 use crossbeam_channel::{Sender, TrySendError};
-use failure::ResultExt;
 use log::{debug, error, trace, warn};
+use snafu::OptionExt;
 use std::collections::hash_map::Entry;
 
 use super::content_collector::CollectorResult;
@@ -33,24 +34,24 @@ pub(super) enum ConnectionState {
 }
 
 fn slot_remove(inner: &mut Inner, channel_id: u16) -> Result<ChannelSlot> {
-    Ok(inner
+    inner
         .chan_slots
         .remove(channel_id)
-        .ok_or_else(|| ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
+        .context(ReceivedFrameWithBogusChannelId { channel_id })
 }
 
 fn slot_get(inner: &mut Inner, channel_id: u16) -> Result<&ChannelSlot> {
-    Ok(inner
+    inner
         .chan_slots
         .get(channel_id)
-        .ok_or_else(|| ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
+        .context(ReceivedFrameWithBogusChannelId { channel_id })
 }
 
 fn slot_get_mut(inner: &mut Inner, channel_id: u16) -> Result<&mut ChannelSlot> {
-    Ok(inner
+    inner
         .chan_slots
         .get_mut(channel_id)
-        .ok_or_else(|| ErrorKind::ReceivedFrameWithBogusChannelId(channel_id))?)
+        .context(ReceivedFrameWithBogusChannelId { channel_id })
 }
 
 fn send<T: Send + Sync + 'static>(tx: &Sender<T>, item: T) -> Result<()> {
@@ -61,11 +62,11 @@ fn send<T: Send + Sync + 'static>(tx: &Sender<T>, item: T) -> Result<()> {
         Ok(()) => Ok(()),
         Err(TrySendError::Full(_)) => {
             error!("internal error - bounded channel is unexpectedly full");
-            Err(ErrorKind::FrameUnexpected)?
+            FrameUnexpected.fail()
         }
         Err(TrySendError::Disconnected(_)) => {
             error!("internal error - channel client dropped without being disconnected");
-            Err(ErrorKind::EventLoopClientDropped)?
+            EventLoopClientDropped.fail()
         }
     }
 }
@@ -143,7 +144,7 @@ impl ConnectionState {
             ConnectionState::Steady(ch0_slot) => ch0_slot,
             ConnectionState::ClientException => return Ok(()),
             ConnectionState::ServerClosing(_) | ConnectionState::ClientClosed => {
-                Err(ErrorKind::FrameUnexpected)?
+                return FrameUnexpected.fail();
             }
         };
 
@@ -156,19 +157,23 @@ impl ConnectionState {
             }
             // We never expect to see a protocl header (we send it to begin the connection)
             // or a heartbeat on a non-0 channel.
-            AMQPFrame::ProtocolHeader | AMQPFrame::Heartbeat(_) => Err(ErrorKind::FrameUnexpected)?,
+            AMQPFrame::ProtocolHeader | AMQPFrame::Heartbeat(_) => return FrameUnexpected.fail(),
             // Server-initiated connection close.
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
                 inner.push_method(0, AmqpConnection::CloseOk(ConnectionCloseOk {}));
                 inner.seal_writes();
-                let err =
-                    ErrorKind::ServerClosedConnection(close.reply_code, close.reply_text.clone());
+                let reply_code = close.reply_code;
+                let message = close.reply_text.clone();
+                let make_err = || Error::ServerClosedConnection {
+                    code: reply_code,
+                    message: message.clone(),
+                };
                 *self = ConnectionState::ServerClosing(close);
 
                 for (_, mut slot) in inner.chan_slots.drain() {
-                    send(&slot.tx, Err(err.clone().into()))?;
+                    send(&slot.tx, Err(make_err()))?;
                     for (_, tx) in slot.consumers.drain() {
-                        send(&tx, ConsumerMessage::ServerClosedConnection(err.clone()))?;
+                        send(&tx, ConsumerMessage::ServerClosedConnection(make_err()))?;
                     }
                 }
             }
@@ -180,11 +185,11 @@ impl ConnectionState {
                     .send(Ok(ChannelMessage::Method(AMQPClass::Connection(
                         AmqpConnection::CloseOk(close_ok),
                     ))))
-                    .context(ErrorKind::EventLoopClientDropped)?;
+                    .map_err(|_| Error::EventLoopClientDropped)?;
                 *self = ConnectionState::ClientClosed;
 
                 for (_, mut slot) in inner.chan_slots.drain() {
-                    send(&slot.tx, Err(ErrorKind::ClientClosedConnection.into()))?;
+                    send(&slot.tx, Err(Error::ClientClosedConnection))?;
                     for (_, tx) in slot.consumers.drain() {
                         send(&tx, ConsumerMessage::ClientClosedConnection)?;
                     }
@@ -216,10 +221,14 @@ impl ConnectionState {
             AMQPFrame::Method(n, AMQPClass::Channel(AmqpChannel::Close(close))) => {
                 warn!("server closing channel {}: {:?}", n, close);
                 let mut slot = slot_remove(inner, n)?;
-                let err = ErrorKind::ServerClosedChannel(n, close.reply_code, close.reply_text);
-                send(&slot.tx, Err(err.clone().into()))?;
+                let make_err = || Error::ServerClosedChannel {
+                    channel_id: n,
+                    code: close.reply_code,
+                    message: close.reply_text.clone(),
+                };
+                send(&slot.tx, Err(make_err()))?;
                 for (_, tx) in slot.consumers.drain() {
-                    send(&tx, ConsumerMessage::ServerClosedChannel(err.clone()))?;
+                    send(&tx, ConsumerMessage::ServerClosedChannel(make_err()))?;
                 }
                 inner.push_method(n, AmqpChannel::CloseOk(ChannelCloseOk {}));
             }
@@ -247,7 +256,13 @@ impl ConnectionState {
                 let consumer_tag = consume_ok.consumer_tag;
                 let slot = slot_get_mut(inner, n)?;
                 match slot.consumers.entry(consumer_tag.clone()) {
-                    Entry::Occupied(_) => Err(ErrorKind::DuplicateConsumerTag(n, consumer_tag))?,
+                    Entry::Occupied(_) => {
+                        return DuplicateConsumerTag {
+                            channel_id: n,
+                            consumer_tag,
+                        }
+                        .fail();
+                    }
                     Entry::Vacant(entry) => {
                         let (tx, rx) = crossbeam_channel::unbounded();
                         entry.insert(tx);
@@ -380,10 +395,13 @@ impl ConnectionState {
                 if let Some(collected) = slot.collector.collect_header(*header)? {
                     match collected {
                         CollectorResult::Delivery((consumer_tag, delivery)) => {
-                            let tx = slot
-                                .consumers
-                                .get(&consumer_tag)
-                                .ok_or_else(|| ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
+                            let tx =
+                                slot.consumers
+                                    .get(&consumer_tag)
+                                    .context(UnknownConsumerTag {
+                                        channel_id: n,
+                                        consumer_tag,
+                                    })?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {
@@ -401,10 +419,13 @@ impl ConnectionState {
                 if let Some(collected) = slot.collector.collect_body(body)? {
                     match collected {
                         CollectorResult::Delivery((consumer_tag, delivery)) => {
-                            let tx = slot
-                                .consumers
-                                .get(&consumer_tag)
-                                .ok_or_else(|| ErrorKind::UnknownConsumerTag(n, consumer_tag))?;
+                            let tx =
+                                slot.consumers
+                                    .get(&consumer_tag)
+                                    .context(UnknownConsumerTag {
+                                        channel_id: n,
+                                        consumer_tag,
+                                    })?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {

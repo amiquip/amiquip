@@ -1,6 +1,7 @@
 use super::{ChannelMessage, ConnectionBlockedNotification, ConsumerMessage, IoLoopMessage};
+use crate::errors::*;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, TryFromAmqpClass};
-use crate::{AmqpProperties, Confirm, Error, ErrorKind, Get, Result, Return};
+use crate::{AmqpProperties, Confirm, Error, Get, Return};
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::Consume;
 use amq_protocol::protocol::basic::Get as AmqpGet;
@@ -73,7 +74,7 @@ impl IoLoopHandle {
         match self.recv()? {
             ChannelMessage::GetOk(get) => Ok(*get),
             ChannelMessage::Method(_) | ChannelMessage::ConsumeOk(_, _) => {
-                Err(ErrorKind::FrameUnexpected)?
+                FrameUnexpected.fail()
             }
         }
     }
@@ -87,7 +88,7 @@ impl IoLoopHandle {
         match self.recv()? {
             ChannelMessage::ConsumeOk(tag, rx) => Ok((tag, rx)),
             ChannelMessage::Method(_) | ChannelMessage::GetOk(_) => {
-                Err(ErrorKind::FrameUnexpected)?
+                FrameUnexpected.fail()
             }
         }
     }
@@ -110,7 +111,7 @@ impl IoLoopHandle {
         match self.recv()? {
             ChannelMessage::Method(method) => T::try_from(method),
             ChannelMessage::ConsumeOk(_, _) | ChannelMessage::GetOk(_) => {
-                Err(ErrorKind::FrameUnexpected)?
+                FrameUnexpected.fail()
             }
         }
     }
@@ -149,7 +150,7 @@ impl IoLoopHandle {
     fn recv(&mut self) -> Result<ChannelMessage> {
         self.rx
             .recv()
-            .map_err(|_| Error::from(ErrorKind::EventLoopDropped))?
+            .map_err(|_| Error::EventLoopDropped)?
     }
 
     fn check_recv_for_error(&mut self) -> Error {
@@ -163,7 +164,7 @@ impl IoLoopHandle {
         match self.recv() {
             Ok(_) => {
                 error!("internal error - received unexpected frame after I/O thread disappeared");
-                ErrorKind::FrameUnexpected.into()
+                Error::FrameUnexpected
             }
             Err(err) => err,
         }
@@ -205,7 +206,7 @@ impl IoLoopHandle0 {
             .map_err(|_| self.common.check_recv_for_error())?;
         self.alloc_chan_rep_rx
             .recv()
-            .map_err(|_| Error::from(ErrorKind::EventLoopDropped))?
+            .map_err(|_| Error::EventLoopDropped)?
     }
 
     pub(super) fn set_blocked_tx(

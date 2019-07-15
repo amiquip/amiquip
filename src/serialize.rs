@@ -1,4 +1,4 @@
-use crate::{ErrorKind, Result};
+use crate::errors::*;
 use amq_protocol::frame::generation::{
     gen_content_body_frame, gen_content_header_frame, gen_heartbeat_frame, gen_method_frame,
 };
@@ -25,7 +25,7 @@ macro_rules! impl_try_from_class {
             fn try_from(class: AMQPClass) -> Result<Self> {
                 match class {
                     $class($method(val)) => Ok(val),
-                    _ => Err(ErrorKind::FrameUnexpected)?,
+                    _ => FrameUnexpected.fail(),
                 }
             }
         }
@@ -159,10 +159,10 @@ impl<T: TryFromAmqpClass> TryFromAmqpFrame for T {
                 if expected_id == channel_id {
                     Self::try_from(method)
                 } else {
-                    Err(ErrorKind::FrameUnexpected)?
+                    FrameUnexpected.fail()
                 }
             }
-            _ => Err(ErrorKind::FrameUnexpected)?,
+            _ => FrameUnexpected.fail()
         }
     }
 }
