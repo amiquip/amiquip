@@ -1,10 +1,10 @@
-use crate::{ErrorKind, Result};
+use crate::errors::*;
 use amq_protocol::frame::{parse_frame, AMQPFrame};
 use amq_protocol::types::parsing::parse_long_uint;
 use bytes::Buf;
-use failure::Fail;
 use input_buffer::{InputBuffer, MIN_READ};
 use log::trace;
+use snafu::ResultExt;
 use std::io;
 use std::marker::PhantomData;
 
@@ -70,7 +70,7 @@ impl FrameKind for AmqpFrameKind {
                 return Ok(frame);
             }
         }
-        Err(ErrorKind::MalformedFrame)?
+        MalformedFrame.fail()
     }
 }
 
@@ -116,14 +116,14 @@ impl<Kind: FrameKind> Inner<Kind> {
 
             // need to read more data from the stream to get to a frame
             match self.buf.prepare_reserve(reserve).read_from(stream) {
-                Ok(0) => return Err(ErrorKind::UnexpectedSocketClose)?,
+                Ok(0) => return UnexpectedSocketClose.fail(),
                 Ok(n) => {
                     trace!("read {} bytes", n);
                     bytes_read += n;
                 }
                 Err(err) => match err.kind() {
                     io::ErrorKind::WouldBlock => return Ok(bytes_read),
-                    _ => return Err(err.context(ErrorKind::Io))?,
+                    _ => return Err(err).context(IoErrorReadingSocket),
                 },
             }
         }
@@ -132,8 +132,8 @@ impl<Kind: FrameKind> Inner<Kind> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ErrorKind, FrameKind, Inner, Result};
-    use crate::Error;
+    use super::{FrameKind, Inner, Result};
+    use crate::errors::*;
     use mockstream::FailingMockStream;
     use std::io::{self, Cursor, Read};
 
@@ -153,7 +153,7 @@ mod tests {
         fn parse_frame(buf: &[u8]) -> Result<Self::Frame> {
             assert!(buf.len() == buf[1] as usize);
             if buf.len() == 6 && &buf[2..] == b"fail" {
-                Err(ErrorKind::MalformedFrame)?
+                MalformedFrame.fail()
             } else {
                 Ok(Vec::from(buf))
             }
@@ -267,7 +267,10 @@ mod tests {
         let mut buf = make_buffer();
         let res = buf.read_from(&mut c, |_| panic!("should not be called"));
         assert!(res.is_err());
-        assert_eq!(*res.unwrap_err().kind(), ErrorKind::MalformedFrame);
+        match res.unwrap_err() {
+            Error::MalformedFrame => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 
     #[test]
@@ -276,9 +279,12 @@ mod tests {
 
         // use __Nonexhaustive as "some non-parsing, non-I/O error"
         let mut buf = make_buffer();
-        let res = buf.read_from(&mut c, |_| Err(Error::from(ErrorKind::__Nonexhaustive)));
+        let res = buf.read_from(&mut c, |_| __Nonexhaustive.fail());
         assert!(res.is_err());
-        assert_eq!(*res.unwrap_err().kind(), ErrorKind::__Nonexhaustive);
+        match res.unwrap_err() {
+            Error::__Nonexhaustive => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 
     #[test]
@@ -288,8 +294,10 @@ mod tests {
         let mut buf = make_buffer();
         let res = buf.read_from(&mut c, |_| panic!("should not be called"));
         assert!(res.is_err());
-        let err = res.unwrap_err();
-        assert_eq!(*err.kind(), ErrorKind::UnexpectedSocketClose);
+        match res.unwrap_err() {
+            Error::UnexpectedSocketClose => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 
     #[test]
@@ -303,7 +311,9 @@ mod tests {
         let mut buf = make_buffer();
         let res = buf.read_from(&mut c, |_| panic!("should not be called"));
         assert!(res.is_err());
-        let err = res.unwrap_err();
-        assert_eq!(*err.kind(), ErrorKind::Io);
+        match res.unwrap_err() {
+            Error::IoErrorReadingSocket { .. } => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 }

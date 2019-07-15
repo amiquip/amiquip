@@ -2,7 +2,7 @@
 //!
 //! amiquip supports most features of the AMQP spec and some RabbitMQ extensions (see a list of
 //! [currently unsupported features](#unsupported-features) below). It aims to be robust: problems
-//! on a channel or connection should lead to a relevant [error](enum.ErrorKind.html) being raised.
+//! on a channel or connection should lead to a relevant [error](enum.Error.html) being raised.
 //! Most errors, however, do result in effectively killing the channel or connection on which they
 //! occur.
 //!
@@ -11,7 +11,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! amiquip = { version = "0.2", default-features = false }
+//! amiquip = { version = "0.3", default-features = false }
 //! ```
 //!
 //! If you disable TLS support, the methods `Connection::open`, `Connection::open_tuned`, and
@@ -194,7 +194,7 @@ pub use connection::{Connection, ConnectionBlockedNotification, ConnectionTuning
 pub use connection_options::ConnectionOptions;
 pub use consumer::{Consumer, ConsumerMessage, ConsumerOptions};
 pub use delivery::Delivery;
-pub use errors::{Error, ErrorKind, Result};
+pub use errors::{Error, Result};
 pub use exchange::{Exchange, ExchangeDeclareOptions, ExchangeType, Publish};
 pub use get::Get;
 pub use queue::{Queue, QueueDeclareOptions, QueueDeleteOptions};

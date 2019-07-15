@@ -1,9 +1,10 @@
 use crate::connection_options::ConnectionOptions;
+use crate::errors::*;
 use crate::frame_buffer::FrameBuffer;
 use crate::serialize::{IntoAmqpClass, OutputBuffer, SealableOutputBuffer};
 use crate::{
-    Confirm, ConnectionBlockedNotification, ConnectionTuning, ConsumerMessage, ErrorKind,
-    FieldTable, Get, IoStream, Result, Return, Sasl,
+    Confirm, ConnectionBlockedNotification, ConnectionTuning, ConsumerMessage, FieldTable, Get,
+    IoStream, Return, Sasl,
 };
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::TuneOk;
@@ -11,11 +12,11 @@ use amq_protocol::protocol::AMQPClass;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use crossbeam_channel::SendError;
 use crossbeam_channel::Sender as CrossbeamSender;
-use failure::{Fail, ResultExt};
 use log::{debug, error, trace, warn};
 use mio::{Event, Evented, Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::sync_channel as mio_sync_channel;
 use mio_extras::channel::Receiver as MioReceiver;
+use snafu::ResultExt;
 use std::collections::hash_map::HashMap;
 use std::io;
 use std::sync::mpsc::TryRecvError;
@@ -147,14 +148,14 @@ impl IoLoop {
     pub(crate) fn new(tuning: ConnectionTuning) -> Result<Self> {
         let heartbeats = HeartbeatTimers::default();
 
-        let poll = Poll::new().context(ErrorKind::Io)?;
+        let poll = Poll::new().context(CreatePollHandle)?;
         poll.register(
             &heartbeats.timer,
             HEARTBEAT,
             Ready::readable(),
             PollOpt::edge(),
         )
-        .context(ErrorKind::Io)?;
+        .context(RegisterWithPollHandle)?;
 
         Ok(IoLoop {
             poll,
@@ -172,13 +173,8 @@ impl IoLoop {
         mut options: ConnectionOptions<Auth>,
     ) -> Result<(JoinHandle<Result<()>>, FieldTable, Channel0Handle)> {
         self.poll
-            .register(
-                &stream,
-                STREAM,
-                Ready::writable(),
-                PollOpt::edge(),
-            )
-            .context(ErrorKind::Io)?;
+            .register(&stream, STREAM, Ready::writable(), PollOpt::edge())
+            .context(RegisterWithPollHandle)?;
 
         self.connection_timeout = options.connection_timeout.take();
         let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
@@ -187,7 +183,7 @@ impl IoLoop {
         let join_handle = Builder::new()
             .name("amiquip-io".to_string())
             .spawn(move || self.thread_main(stream, options, handshake_done_tx, ch0_slot, false))
-            .context(ErrorKind::ForkFailed)?;
+            .context(ForkFailed)?;
 
         IoLoop::wait_for_amqp_handshake(ch0_handle, join_handle, handshake_done_rx)
     }
@@ -205,7 +201,7 @@ impl IoLoop {
                 Ready::readable() | Ready::writable(),
                 PollOpt::edge(),
             )
-            .context(ErrorKind::Io)?;
+            .context(RegisterWithPollHandle)?;
 
         self.connection_timeout = options.connection_timeout.take();
         let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
@@ -214,7 +210,7 @@ impl IoLoop {
         let join_handle = Builder::new()
             .name("amiquip-io".to_string())
             .spawn(move || self.thread_main_tls(stream, options, handshake_done_tx, ch0_slot))
-            .context(ErrorKind::ForkFailed)?;
+            .context(ForkFailed)?;
 
         IoLoop::wait_for_amqp_handshake(ch0_handle, join_handle, handshake_done_rx)
     }
@@ -238,7 +234,7 @@ impl IoLoop {
                     unreachable!("I/O thread ended successfully without completing handshake")
                 }
                 Ok(Err(err)) => Err(err),
-                Err(_) => Err(ErrorKind::IoThreadPanic.into()),
+                Err(_) => IoThreadPanic.fail(),
             },
         }
     }
@@ -290,7 +286,7 @@ impl IoLoop {
                 Ready::readable(),
                 PollOpt::edge(),
             )
-            .context(ErrorKind::Io)?;
+            .context(RegisterWithPollHandle)?;
         self.poll
             .register(
                 &ch0_slot.set_blocked_rx,
@@ -298,7 +294,7 @@ impl IoLoop {
                 Ready::readable(),
                 PollOpt::edge(),
             )
-            .context(ErrorKind::Io)?;
+            .context(RegisterWithPollHandle)?;
         self.poll
             .register(
                 &ch0_slot.alloc_chan_req_rx,
@@ -306,8 +302,9 @@ impl IoLoop {
                 Ready::readable(),
                 PollOpt::edge(),
             )
-            .context(ErrorKind::Io)?;
-        let (tune_ok, server_properties) = self.run_amqp_handshake(&mut stream, options, have_written_to_socket)?;
+            .context(RegisterWithPollHandle)?;
+        let (tune_ok, server_properties) =
+            self.run_amqp_handshake(&mut stream, options, have_written_to_socket)?;
         let channel_max = tune_ok.channel_max;
         match handshake_done_tx.send((tune_ok.frame_max as usize, server_properties)) {
             Ok(_) => (),
@@ -339,7 +336,7 @@ impl IoLoop {
                 // failing.
                 return match state {
                     HandshakeState::Secure(_, _) => {
-                        Err(err).context(ErrorKind::InvalidCredentials)?
+                        InvalidCredentials.fail()
                     }
                     _ => Err(err),
                 };
@@ -352,10 +349,10 @@ impl IoLoop {
             | HandshakeState::Tune(_, _)
             | HandshakeState::Open(_, _) => unreachable!(),
             HandshakeState::Done(tune_ok, server_properties) => Ok((tune_ok, server_properties)),
-            HandshakeState::ServerClosing(close) => Err(ErrorKind::ServerClosedConnection(
-                close.reply_code,
-                close.reply_text,
-            ))?,
+            HandshakeState::ServerClosing(close) => ServerClosedConnection {
+                code: close.reply_code,
+                message: close.reply_text,
+            }.fail()
         }
     }
 
@@ -418,11 +415,11 @@ impl IoLoop {
         )?;
         match state {
             ConnectionState::Steady(_) => unreachable!(),
-            ConnectionState::ServerClosing(close) => Err(ErrorKind::ServerClosedConnection(
-                close.reply_code,
-                close.reply_text,
-            ))?,
-            ConnectionState::ClientException => Err(ErrorKind::ClientException)?,
+            ConnectionState::ServerClosing(close) => ServerClosedConnection {
+                code: close.reply_code,
+                message: close.reply_text,
+            }.fail(),
+            ConnectionState::ClientException => ClientException.fail(),
             ConnectionState::ClientClosed => Ok(()),
         }
     }
@@ -488,7 +485,7 @@ impl IoLoop {
             let tx = match ch0_slot.set_blocked_rx.try_recv() {
                 Ok(tx) => tx,
                 Err(TryRecvError::Empty) => return Ok(()),
-                Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
+                Err(TryRecvError::Disconnected) => return EventLoopClientDropped.fail(),
             };
             ch0_slot.blocked_tx = Some(tx);
         }
@@ -544,7 +541,7 @@ impl IoLoop {
                     Ready::readable() | Ready::writable(),
                     PollOpt::edge(),
                 )
-                .context(ErrorKind::Io)?;
+                .context(RegisterWithPollHandle)?;
         }
 
         let mut events = Events::with_capacity(128);
@@ -553,11 +550,11 @@ impl IoLoop {
             let start_poll = Instant::now();
             self.poll
                 .poll(&mut events, self.connection_timeout)
-                .context(ErrorKind::Io)?;
+                .context(FailedToPoll)?;
             if events.is_empty() {
                 if let Some(timeout) = &self.connection_timeout {
                     if start_poll.elapsed() > *timeout {
-                        return Err(ErrorKind::ConnectionTimeout)?;
+                        return ConnectionTimeout.fail();
                     }
                 }
                 continue;
@@ -607,13 +604,13 @@ impl IoLoop {
                         Ready::readable() | Ready::writable(),
                         PollOpt::edge(),
                     )
-                    .context(ErrorKind::Io)?;
+                    .context(RegisterWithPollHandle)?;
             } else if had_data_to_write {
                 trace!("reregistering socket for readable only");
                 have_written_to_socket = true;
                 self.poll
                     .reregister(stream, STREAM, Ready::readable(), PollOpt::edge())
-                    .context(ErrorKind::Io)?;
+                    .context(RegisterWithPollHandle)?;
             }
         }
     }
@@ -682,7 +679,7 @@ impl Inner {
 
     fn deregister_nonzero_channels(&mut self, poll: &Poll) -> Result<()> {
         for (_, slot) in self.chan_slots.iter() {
-            poll.deregister(&slot.rx).context(ErrorKind::Io)?;
+            poll.deregister(&slot.rx).context(DeregisterWithPollHandle)?;
         }
         self.channels_are_registered = false;
         Ok(())
@@ -696,7 +693,7 @@ impl Inner {
                 Ready::readable(),
                 PollOpt::edge(),
             )
-            .context(ErrorKind::Io)?;
+            .context(RegisterWithPollHandle)?;
         }
         self.channels_are_registered = true;
         Ok(())
@@ -711,7 +708,7 @@ impl Inner {
                     }
                     HeartbeatState::Expired => {
                         error!("missed heartbeats from server - closing connection");
-                        return Err(ErrorKind::MissedServerHeartbeats)?;
+                        return MissedServerHeartbeats.fail();
                     }
                 },
                 HeartbeatKind::Tx => match self.heartbeats.fire_tx() {
@@ -739,7 +736,7 @@ impl Inner {
             match ch0_slot.common.rx.try_recv() {
                 Ok(message) => self.process_channel_message(0, message)?,
                 Err(TryRecvError::Empty) => return Ok(()),
-                Err(TryRecvError::Disconnected) => Err(ErrorKind::EventLoopClientDropped)?,
+                Err(TryRecvError::Disconnected) => return EventLoopClientDropped.fail(),
             }
         }
     }
@@ -762,7 +759,7 @@ impl Inner {
             match slot.rx.try_recv() {
                 Ok(message) => self.process_channel_message(channel_id, message)?,
                 Err(TryRecvError::Empty) => return Ok(()),
-                Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
+                Err(TryRecvError::Disconnected) => return EventLoopClientDropped.fail(),
             }
         }
     }
@@ -799,7 +796,7 @@ impl Inner {
             let new_channel_id = match ch0_slot.alloc_chan_req_rx.try_recv() {
                 Ok(new_channel_id) => new_channel_id,
                 Err(TryRecvError::Empty) => return Ok(()),
-                Err(TryRecvError::Disconnected) => return Err(ErrorKind::EventLoopClientDropped)?,
+                Err(TryRecvError::Disconnected) => return EventLoopClientDropped.fail(),
             };
 
             let mio_channel_bound = self.mio_channel_bound;
@@ -812,14 +809,14 @@ impl Inner {
                     Ready::readable(),
                     PollOpt::edge(),
                 )
-                .context(ErrorKind::Io)?;
+                .context(RegisterWithPollHandle)?;
                 if !channels_are_registered {
                     // If we're currently in a deregistered state (i.e., too much data to
                     // write), go ahead and deregister this new channel. We do the register+
                     // deregister dance so we can call reregister on this new channel even
                     // though it hadn't existed when we deregistered all the existing
                     // channels.
-                    poll.deregister(&slot.rx).context(ErrorKind::Io)?;
+                    poll.deregister(&slot.rx).context(DeregisterWithPollHandle)?;
                 }
                 Ok((slot, handle))
             });
@@ -876,7 +873,7 @@ impl Inner {
                         self.outbuf.drain_written(pos);
                         return Ok(());
                     }
-                    _ => return Err(err.context(ErrorKind::Io))?,
+                    _ => return Err(err).context(IoErrorWritingSocket),
                 },
             };
             pos += n;

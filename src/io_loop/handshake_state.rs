@@ -1,7 +1,8 @@
 use super::Inner;
 use crate::connection_options::ConnectionOptions;
+use crate::errors::*;
 use crate::serialize::TryFromAmqpFrame;
-use crate::{ErrorKind, FieldTable, Result, Sasl};
+use crate::{FieldTable, Sasl};
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::connection::{Close, CloseOk, OpenOk, Secure, Start, Tune, TuneOk};
@@ -41,7 +42,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 // need a secure/secure-ok
                 if let Ok(secure) = Secure::try_from(0, frame.clone()) {
                     error!("received unsupported handshake {:?}", secure);
-                    return Err(ErrorKind::SaslSecureNotSupported)?;
+                    return SaslSecureNotSupported.fail();
                 }
                 *self = HandshakeState::Tune(options.clone(), server_properties.clone());
                 return self.process(inner, frame);
@@ -77,7 +78,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 *self = HandshakeState::Done(tune_ok.clone(), server_properties.clone());
             }
             HandshakeState::ServerClosing(_) | HandshakeState::Done(_, _) => {
-                Err(ErrorKind::FrameUnexpected)?
+                return FrameUnexpected.fail();
             }
         }
         Ok(())

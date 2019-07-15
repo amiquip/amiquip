@@ -1,4 +1,5 @@
-use crate::{AmqpProperties, Delivery, ErrorKind, Get, Result, Return};
+use crate::errors::*;
+use crate::{AmqpProperties, Delivery, Get, Return};
 use amq_protocol::frame::AMQPContentHeader;
 use amq_protocol::protocol::basic::Deliver;
 use amq_protocol::protocol::basic::GetOk as AmqpGetOk;
@@ -29,7 +30,7 @@ impl ContentCollector {
                 self.kind = Some(Kind::Delivery(State::Start(deliver)));
                 Ok(())
             }
-            Some(_) => Err(ErrorKind::FrameUnexpected)?,
+            Some(_) => FrameUnexpected.fail(),
         }
     }
 
@@ -39,7 +40,7 @@ impl ContentCollector {
                 self.kind = Some(Kind::Return(State::Start(return_)));
                 Ok(())
             }
-            Some(_) => Err(ErrorKind::FrameUnexpected)?,
+            Some(_) => FrameUnexpected.fail(),
         }
     }
 
@@ -49,7 +50,7 @@ impl ContentCollector {
                 self.kind = Some(Kind::Get(State::Start(get_ok)));
                 Ok(())
             }
-            Some(_) => Err(ErrorKind::FrameUnexpected)?,
+            Some(_) => FrameUnexpected.fail(),
         }
     }
 
@@ -88,7 +89,7 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
-            None => Err(ErrorKind::FrameUnexpected)?,
+            None => FrameUnexpected.fail(),
         }
     }
 
@@ -124,7 +125,7 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
-            None => Err(ErrorKind::FrameUnexpected)?,
+            None => FrameUnexpected.fail(),
         }
     }
 }
@@ -223,7 +224,7 @@ impl<T: ContentType> State<T> {
                     Ok(Content::NeedMore(State::Body(start, header, buf)))
                 }
             }
-            State::Body(_, _, _) => Err(ErrorKind::FrameUnexpected)?,
+            State::Body(_, _, _) => FrameUnexpected.fail(),
         }
     }
 
@@ -242,10 +243,10 @@ impl<T: ContentType> State<T> {
                 } else if buf.len() < body_size {
                     Ok(Content::NeedMore(State::Body(start, header, buf)))
                 } else {
-                    Err(ErrorKind::FrameUnexpected)?
+                    FrameUnexpected.fail()
                 }
             }
-            State::Start(_) => Err(ErrorKind::FrameUnexpected)?,
+            State::Start(_) => FrameUnexpected.fail(),
         }
     }
 }

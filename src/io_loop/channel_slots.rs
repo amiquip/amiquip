@@ -1,6 +1,7 @@
-use crate::{ErrorKind, Result};
+use crate::errors::*;
 use indexmap::IndexSet;
-use std::collections::hash_map::{Entry, HashMap, Drain};
+use snafu::OptionExt;
+use std::collections::hash_map::{Drain, Entry, HashMap};
 
 pub(crate) struct ChannelSlots<T> {
     slots: HashMap<u16, T>,
@@ -26,7 +27,7 @@ impl<T> ChannelSlots<T> {
         self.slots.drain()
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item=(&u16, &T)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&u16, &T)> {
         self.slots.iter()
     }
 
@@ -55,10 +56,10 @@ impl<T> ChannelSlots<T> {
             None => return self.insert_unused_channel_id(make_entry),
         };
         if channel_id > self.channel_max {
-            return Err(ErrorKind::UnavailableChannelId(channel_id))?;
+            return UnavailableChannelId { channel_id }.fail();
         }
         match self.slots.entry(channel_id) {
-            Entry::Occupied(_) => Err(ErrorKind::UnavailableChannelId(channel_id))?,
+            Entry::Occupied(_) => UnavailableChannelId { channel_id }.fail(),
             Entry::Vacant(entry) => {
                 let (t, u) = make_entry(channel_id)?;
                 entry.insert(t);
@@ -95,10 +96,7 @@ impl<T> ChannelSlots<T> {
 
         // At the end of our rope for simple channel allocation; fall back to finding
         // one that has been previously freed.
-        let channel_id = self
-            .freed_channel_ids
-            .pop()
-            .ok_or(ErrorKind::ExhaustedChannelIds)?;
+        let channel_id = self.freed_channel_ids.pop().context(ExhaustedChannelIds)?;
         match self.slots.entry(channel_id) {
             Entry::Occupied(_) => unreachable!("free channel id cannot be occupied"),
             Entry::Vacant(entry) => {
@@ -151,7 +149,10 @@ mod tests {
     fn insert_channel_above_max_fails() {
         let mut cs = with_channel_max(4);
         let res = cs.insert(Some(5), id);
-        assert_eq!(*res.unwrap_err().kind(), ErrorKind::UnavailableChannelId(5));
+        match res.unwrap_err() {
+            Error::UnavailableChannelId { channel_id } if channel_id == 5 => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 
     #[test]
@@ -159,7 +160,10 @@ mod tests {
         let mut cs = with_channel_max(4);
         cs.insert(Some(1), id).unwrap();
         let res = cs.insert(Some(1), id);
-        assert_eq!(*res.unwrap_err().kind(), ErrorKind::UnavailableChannelId(1));
+        match res.unwrap_err() {
+            Error::UnavailableChannelId { channel_id } if channel_id == 1 => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 
     #[test]
@@ -193,6 +197,9 @@ mod tests {
         for i in 1..=4 {
             cs.insert(Some(i), id).unwrap();
         }
-        assert_eq!(*cs.insert(None, id).unwrap_err().kind(), ErrorKind::ExhaustedChannelIds);
+        match cs.insert(None, id).unwrap_err() {
+            Error::ExhaustedChannelIds => (),
+            err => panic!("unexpected error {}", err),
+        }
     }
 }

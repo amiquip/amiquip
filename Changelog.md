@@ -1,5 +1,9 @@
-# Version UPCOMING
+# Version 0.3 (2019-07-14)
 
+* Internally, `Error` is now created via `snafu` instead of `failure`. This leads to three breaking changes:
+  * `Error` no longer implements `Clone` or `PartialEq`, but _does_ implement `std::error::Error`.
+  * The `ErrorKind` helper enum no longer exists; `Error` is itself an enum.
+  * The definition of most error cases has changes (and there are considerably more of them).
 * Add missing `Debug`, `Clone`, `Copy`, and/or `Default` derivations for `ExchangeType`, `Publish`, and `QueueDeleteOption`.
 
 # Version 0.2.2 (2019-05-07)

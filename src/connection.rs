@@ -1,6 +1,7 @@
 use crate::connection_options::ConnectionOptions;
+use crate::errors::*;
 use crate::io_loop::{Channel0Handle, IoLoop};
-use crate::{Channel, ErrorKind, FieldTable, IoStream, Result, Sasl};
+use crate::{Channel, FieldTable, IoStream, Sasl};
 use crossbeam_channel::Receiver;
 use log::debug;
 use std::thread::JoinHandle;
@@ -173,7 +174,7 @@ impl Connection {
     /// Equivalent to [`insecure_open_tuned`](#method.insecure_open_tuned), except
     /// only secure URLs (`amqps://...`) are allowed. Calling this method with an insecure
     /// (`amqp://...`) URL will return an error with [kind
-    /// `InsecureUrl`](enum.ErrorKind.html#variant.InsecureUrl).
+    /// `InsecureUrl`](enum.Error.html#variant.InsecureUrl).
     #[cfg(feature = "native-tls")]
     pub fn open_tuned(url: &str, tuning: ConnectionTuning) -> Result<Connection> {
         self::amqp_url::open(url, tuning, false)
@@ -322,7 +323,7 @@ impl Connection {
     /// will have the request ID if possible, or an error will be returned if that channel ID not
     /// available. If `channel_id` is `None`, the connection will choose an available channel ID
     /// (unless all available channel IDs are exhausted, in which case this method will return
-    /// [`ErrorKind::ExhaustedChannelIds`](enum.ErrorKind.html#variant.ExhaustedChannelIds).
+    /// [`Error::ExhaustedChannelIds`](enum.Error.html#variant.ExhaustedChannelIds).
     ///
     /// The returned channel is tied to this connection in a logical sense but not in any ownership
     /// way. For example, it may be passed to a thread for use. However, closing (or dropping,
@@ -358,14 +359,14 @@ impl Connection {
     ///
     /// If the I/O thread panics, this method will return an error with its
     /// [kind](struct.Error.html#method.kind) set to
-    /// [`ErrorKind::IoThreadPanic`](enum.ErrorKind.html#variant.IoThreadPanic). (Note - the I/O
+    /// [`Error::IoThreadPanic`](enum.Error.html#variant.IoThreadPanic). (Note - the I/O
     /// thread _should not_ panic. If it does, please [file an
     /// issue](https://github.com/jgallagher/amiquip/issues).) For this reason, applications that
     /// want more detail about errors to separate the use of the connection from closing it. For
     /// example:
     ///
     /// ```rust
-    /// use amiquip::{Connection, Result, ErrorKind};
+    /// use amiquip::{Connection, Result};
     ///
     /// fn use_connection(connection: &mut Connection) -> Result<()> {
     ///     // ...do all the things...
@@ -398,7 +399,7 @@ impl Connection {
             let close_result = self.channel0.close_connection();
 
             // wait for the I/O thread to end, and return its panic or error.
-            join_handle.join().map_err(|_| ErrorKind::IoThreadPanic)??;
+            join_handle.join().map_err(|_| Error::IoThreadPanic)??;
 
             // join ended cleanly; return the result of closing the connection.
             close_result
@@ -414,15 +415,15 @@ impl Connection {
 mod amqp_url {
     use super::*;
     use crate::{Auth, Error};
-    use failure::ResultExt;
     use mio::net::TcpStream;
+    use snafu::ResultExt;
     use std::borrow::Cow;
     use std::net::ToSocketAddrs;
     use std::time::Duration;
     use url::{percent_encoding, Url};
 
     pub fn open(url: &str, tuning: ConnectionTuning, allow_insecure: bool) -> Result<Connection> {
-        let mut url = Url::parse(url)?;
+        let mut url = Url::parse(url).context(UrlParseError)?;
         let scheme = populate_host_and_port(&mut url)?;
         let options = decode(&url)?;
 
@@ -431,7 +432,7 @@ mod amqp_url {
                 if allow_insecure {
                     open_amqp(url, options, tuning)
                 } else {
-                    Err(ErrorKind::InsecureUrl)?
+                    return InsecureUrl { url }.fail();
                 }
             }
             Scheme::Amqps => open_amqps(url, options, tuning),
@@ -443,27 +444,30 @@ mod amqp_url {
         options: ConnectionOptions<Auth>,
         tuning: ConnectionTuning,
     ) -> Result<Connection> {
-        let mut last_err = Error::from(ErrorKind::InvalidUrl(url.clone()));
-        for addr in url.to_socket_addrs().context(ErrorKind::Io)? {
+        let mut last_err: Option<Error> = None;
+        for addr in url
+            .to_socket_addrs()
+            .with_context(|| ResolveUrlToSocketAddr { url: url.clone() })?
+        {
             let result = TcpStream::connect(&addr)
-                .context(ErrorKind::Io)
-                .map_err(Error::from)
+                .with_context(|| FailedToConnect { url: url.clone() })
                 .and_then(|stream| {
                     Connection::insecure_open_stream(stream, options.clone(), tuning.clone())
                 });
             match result {
                 Ok(connection) => return Ok(connection),
                 Err(err) => {
-                    last_err = err;
+                    last_err = Some(err.into());
                 }
             }
         }
+        let last_err = last_err.unwrap_or(Error::UrlNoSocketAddrs { url });
         Err(last_err)
     }
 
     #[cfg(not(feature = "native-tls"))]
     fn open_amqps(_: Url, _: ConnectionOptions<Auth>, _: ConnectionTuning) -> Result<Connection> {
-        Err(ErrorKind::TlsFeatureNotEnabled)?
+        TlsFeatureNotEnabled.fail()
     }
 
     #[cfg(feature = "native-tls")]
@@ -472,17 +476,18 @@ mod amqp_url {
         options: ConnectionOptions<Auth>,
         tuning: ConnectionTuning,
     ) -> Result<Connection> {
-        let mut last_err = Error::from(ErrorKind::InvalidUrl(url.clone()));
-        let connector =
-            native_tls::TlsConnector::new().map_err(|e| ErrorKind::TlsError(format!("{}", e)))?;
+        let mut last_err: Option<Error> = None;
+        let connector = native_tls::TlsConnector::new().context(CreateTlsConnector)?;
         let domain = match url.domain() {
             Some(domain) => domain,
-            None => return Err(last_err),
+            None => return UrlMissingDomain { url: url.clone() }.fail(),
         };
-        for addr in url.to_socket_addrs().context(ErrorKind::Io)? {
+        for addr in url
+            .to_socket_addrs()
+            .with_context(|| ResolveUrlToSocketAddr { url: url.clone() })?
+        {
             let result = TcpStream::connect(&addr)
-                .context(ErrorKind::Io)
-                .map_err(|err| Error::from(err))
+                .with_context(|| FailedToConnect { url: url.clone() })
                 .and_then(|stream| {
                     Connection::open_tls_stream(
                         connector.clone(),
@@ -495,10 +500,11 @@ mod amqp_url {
             match result {
                 Ok(connection) => return Ok(connection),
                 Err(err) => {
-                    last_err = err;
+                    last_err = Some(err);
                 }
             }
         }
+        let last_err = last_err.unwrap_or(Error::UrlNoSocketAddrs { url });
         Err(last_err)
     }
 
@@ -510,20 +516,20 @@ mod amqp_url {
 
     fn populate_host_and_port(url: &mut Url) -> Result<Scheme> {
         if !url.has_host() || url.host_str() == Some("") {
-            url.set_host(Some("localhost"))?;
+            url.set_host(Some("localhost")).context(UrlParseError)?;
         }
         match url.scheme() {
             "amqp" => {
                 url.set_port(Some(url.port().unwrap_or(5672)))
-                    .map_err(|_| ErrorKind::InvalidUrl(url.clone()))?;
+                    .map_err(|()| Error::SpecifyUrlPort { url: url.clone() })?;
                 Ok(Scheme::Amqp)
             }
             "amqps" => {
                 url.set_port(Some(url.port().unwrap_or(5671)))
-                    .map_err(|_| ErrorKind::InvalidUrl(url.clone()))?;
+                    .map_err(|()| Error::SpecifyUrlPort { url: url.clone() })?;
                 Ok(Scheme::Amqps)
             }
-            _ => Err(ErrorKind::InvalidUrl(url.clone()))?,
+            _ => InvalidUrlScheme { url: url.clone() }.fail(),
         }
     }
 
@@ -532,7 +538,6 @@ mod amqp_url {
             let s = percent_encoding::percent_decode(s.as_bytes());
             s.decode_utf8_lossy()
         }
-        let invalid_url = || ErrorKind::InvalidUrl(url.clone());
 
         let mut options = ConnectionOptions::default();
         if let Some(mut path_segments) = url.path_segments() {
@@ -550,7 +555,7 @@ mod amqp_url {
 
             // make sure there are no other path segments
             if path_segments.next().is_some() {
-                return Err(invalid_url())?;
+                return ExtraUrlPathSegments { url: url.clone() }.fail();
             }
         }
 
@@ -569,25 +574,41 @@ mod amqp_url {
         for (k, v) in url.query_pairs() {
             match k.as_ref() {
                 "heartbeat" => {
-                    let v = v.parse::<u16>().map_err(|_| invalid_url())?;
+                    let v = v
+                        .parse::<u16>()
+                        .with_context(|| UrlParseHeartbeat { url: url.clone() })?;
                     options = options.heartbeat(v);
                 }
                 "channel_max" => {
-                    let v = v.parse::<u16>().map_err(|_| invalid_url())?;
+                    let v = v
+                        .parse::<u16>()
+                        .with_context(|| UrlParseChannelMax { url: url.clone() })?;
                     options = options.channel_max(v);
                 }
                 "connection_timeout" => {
-                    let v = v.parse::<u64>().map_err(|_| invalid_url())?;
+                    let v = v
+                        .parse::<u64>()
+                        .with_context(|| UrlParseConnectionTimeout { url: url.clone() })?;
                     options = options.connection_timeout(Some(Duration::from_millis(v)));
                 }
                 "auth_mechanism" => {
                     if v == "external" {
                         options = options.auth(Auth::External);
                     } else {
-                        return Err(invalid_url())?;
+                        return UrlInvalidAuthMechanism {
+                            url: url.clone(),
+                            mechanism: v,
+                        }
+                        .fail();
                     }
                 }
-                _ => return Err(invalid_url())?,
+                parameter => {
+                    return UrlUnsupportedParameter {
+                        url: url.clone(),
+                        parameter,
+                    }
+                    .fail();
+                }
             }
         }
 
@@ -606,7 +627,10 @@ mod amqp_url {
         #[cfg(feature = "native-tls")]
         fn open_rejects_amqp_urls() {
             let result = Connection::open("amqp://localhost/");
-            assert_eq!(*result.unwrap_err().kind(), ErrorKind::InsecureUrl);
+            match result.unwrap_err() {
+                Error::InsecureUrl { .. } => (),
+                err => panic!("unexpected error {}", err),
+            }
         }
 
         #[test]

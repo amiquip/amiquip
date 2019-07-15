@@ -1,8 +1,8 @@
 use super::{HandshakeStream, IoStream};
-use crate::{ErrorKind, Result};
-use failure::Fail;
+use crate::errors::*;
 use mio::{Evented, Poll, PollOpt, Ready, Token};
 use native_tls::{HandshakeError, MidHandshakeTlsStream};
+use snafu::ResultExt;
 use std::io::{self, Read, Write};
 
 /// Newtype wrapper around a `native_tls::TlsConnector` to make it usable by amiquip's I/O loop.
@@ -16,7 +16,7 @@ impl TlsConnector {
         let inner = Some(match self.0.connect(domain, stream) {
             Ok(s) => InnerHandshake::Done(s),
             Err(HandshakeError::WouldBlock(s)) => InnerHandshake::MidHandshake(s),
-            Err(HandshakeError::Failure(err)) => Err(err.context(ErrorKind::TlsHandshake))?,
+            Err(HandshakeError::Failure(err)) => Err(err).context(TlsHandshake)?,
         });
         Ok(TlsHandshakeStream { inner })
     }
@@ -61,7 +61,7 @@ impl<S: Evented + Read + Write + Send + 'static> HandshakeStream for TlsHandshak
                 self.inner = Some(InnerHandshake::MidHandshake(s));
                 Ok(None)
             }
-            Err(HandshakeError::Failure(err)) => Err(err.context(ErrorKind::TlsHandshake))?,
+            Err(HandshakeError::Failure(err)) => Err(err).context(TlsHandshake)?,
         }
     }
 }
