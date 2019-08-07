@@ -247,7 +247,6 @@ pub enum Error {
     ))]
     UnknownConsumerTag { channel_id: u16, consumer_tag: String },
 
-    #[doc(hidden)]
     #[snafu(display("invalid error case"))]
     __Nonexhaustive,
 }

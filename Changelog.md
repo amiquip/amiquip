@@ -1,3 +1,7 @@
+# Version 0.3.1 (2019-08-06)
+
+* Remove `#[doc(hidden)]` attribute to work around https://github.com/shepmaster/snafu/issues/139.
+
 # Version 0.3 (2019-07-14)
 
 * Internally, `Error` is now created via `snafu` instead of `failure`. This leads to three breaking changes:
