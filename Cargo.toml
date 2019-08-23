@@ -18,7 +18,7 @@ all-features = true
 default = ["native-tls"]
 
 [dependencies]
-snafu = "0.4"
+snafu = "0.4.4"
 input_buffer = "0.2"
 bytes = "0.4"
 amq-protocol = "1.4"
