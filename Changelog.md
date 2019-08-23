@@ -1,3 +1,8 @@
+# Version 0.3.2 (2019-08-23)
+
+* Restore `#[doc(hidden)]` attribute with upgrade to snafu 0.4.4.
+* Fix `basic_publish`'s immediate/mandatory mixup.
+
 # Version 0.3.1 (2019-08-06)
 
 * Remove `#[doc(hidden)]` attribute to work around https://github.com/shepmaster/snafu/issues/139.
