@@ -169,7 +169,7 @@ impl Channel {
             exchange: exchange.into(),
             routing_key: publish.routing_key,
             mandatory: publish.mandatory,
-            immediate: publish.mandatory,
+            immediate: publish.immediate,
         }))?;
         inner.send_content(
             publish.body,
