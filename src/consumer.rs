@@ -7,6 +7,21 @@ use std::cell::Cell;
 ///
 /// The [`default`](#impl-Default) implementation sets all boolean fields to false and has an empty
 /// set of arguments.
+/// 
+/// # Example
+/// 
+/// The [`arguments`](#structfield.arguments) field can be used to set a
+/// [consumer priority](https://www.rabbitmq.com/consumer-priority.html):
+/// 
+/// ```rust
+/// # use amiquip::{AmqpValue, ConsumerOptions, FieldTable};
+/// let mut arguments = FieldTable::new();
+/// arguments.insert("x-priority".to_string(), AmqpValue::ShortInt(10));
+/// let options = ConsumerOptions {
+///     arguments,
+///     ..ConsumerOptions::default()
+/// };
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct ConsumerOptions {
     /// If true, the server will not send this consumer messages that were published by the
