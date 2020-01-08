@@ -1,7 +1,7 @@
+use crate::Result;
 use mio::net::TcpStream;
 use mio::Evented;
 use std::io::{Read, Write};
-use crate::Result;
 
 pub(crate) trait HandshakeStream: Evented + Send + 'static {
     type Stream: IoStream;

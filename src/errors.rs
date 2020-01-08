@@ -73,18 +73,35 @@ pub enum Error {
 
     /// Could not parse heartbeat parameter of URL.
     #[snafu(display("could not parse heartbeat parameter of URL {}: {}", url, source))]
-    UrlParseHeartbeat { url: Url, source: std::num::ParseIntError },
+    UrlParseHeartbeat {
+        url: Url,
+        source: std::num::ParseIntError,
+    },
 
     /// Could not parse channel_max parameter of URL.
     #[snafu(display("could not parse channel_max parameter of URL {}: {}", url, source))]
-    UrlParseChannelMax { url: Url, source: std::num::ParseIntError },
+    UrlParseChannelMax {
+        url: Url,
+        source: std::num::ParseIntError,
+    },
 
     /// Could not parse connection_timeout parameter of URL.
-    #[snafu(display("could not parse connection_timeout parameter of URL {}: {}", url, source))]
-    UrlParseConnectionTimeout { url: Url, source: std::num::ParseIntError },
+    #[snafu(display(
+        "could not parse connection_timeout parameter of URL {}: {}",
+        url,
+        source
+    ))]
+    UrlParseConnectionTimeout {
+        url: Url,
+        source: std::num::ParseIntError,
+    },
 
     /// Invalid auth mechanism requested in URL.
-    #[snafu(display("invalid auth mechanism for URL {}: {} (expected `external`)", url, mechanism))]
+    #[snafu(display(
+        "invalid auth mechanism for URL {}: {} (expected `external`)",
+        url,
+        mechanism
+    ))]
     UrlInvalidAuthMechanism { url: Url, mechanism: String },
 
     /// Unsupported URL parameter.
@@ -237,7 +254,10 @@ pub enum Error {
         channel_id,
         consumer_tag
     ))]
-    DuplicateConsumerTag { channel_id: u16, consumer_tag: String },
+    DuplicateConsumerTag {
+        channel_id: u16,
+        consumer_tag: String,
+    },
 
     /// The server sent us a [`Delivery`](struct.Delivery.html) for a channel we don't know about.
     #[snafu(display(
@@ -245,7 +265,10 @@ pub enum Error {
         channel_id,
         consumer_tag
     ))]
-    UnknownConsumerTag { channel_id: u16, consumer_tag: String },
+    UnknownConsumerTag {
+        channel_id: u16,
+        consumer_tag: String,
+    },
 
     #[doc(hidden)]
     __Nonexhaustive,

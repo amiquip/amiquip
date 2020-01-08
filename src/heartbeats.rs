@@ -1,7 +1,7 @@
 use log::trace;
 use mio_extras::timer::{Timeout, Timer};
-use std::time::{Duration, Instant};
 use std::fmt::Debug;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum HeartbeatState {
@@ -57,7 +57,10 @@ impl<T: Copy + Debug> Heartbeat<T> {
 
         trace!(
             "setting new heartbeat timer {:?} for {:?} (interval = {:?}, elapsed = {:?})",
-            self.val, when, self.interval, elapsed
+            self.val,
+            when,
+            self.interval,
+            elapsed
         );
         self.timeout = timer.set_timeout(when, self.val);
         state
