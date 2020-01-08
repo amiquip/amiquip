@@ -5,8 +5,8 @@ use amq_protocol::frame::generation::{
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::AMQPProperties;
-use amq_protocol::protocol::confirm::AMQPMethod as AmqpConfirm;
 use amq_protocol::protocol::channel::AMQPMethod as AmqpChannel;
+use amq_protocol::protocol::confirm::AMQPMethod as AmqpConfirm;
 use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
@@ -162,7 +162,7 @@ impl<T: TryFromAmqpClass> TryFromAmqpFrame for T {
                     FrameUnexpected.fail()
                 }
             }
-            _ => FrameUnexpected.fail()
+            _ => FrameUnexpected.fail(),
         }
     }
 }

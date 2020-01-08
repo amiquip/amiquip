@@ -73,9 +73,7 @@ impl IoLoopHandle {
         self.send(IoLoopMessage::Send(buf))?;
         match self.recv()? {
             ChannelMessage::GetOk(get) => Ok(*get),
-            ChannelMessage::Method(_) | ChannelMessage::ConsumeOk(_, _) => {
-                FrameUnexpected.fail()
-            }
+            ChannelMessage::Method(_) | ChannelMessage::ConsumeOk(_, _) => FrameUnexpected.fail(),
         }
     }
 
@@ -87,9 +85,7 @@ impl IoLoopHandle {
         self.send(IoLoopMessage::Send(buf))?;
         match self.recv()? {
             ChannelMessage::ConsumeOk(tag, rx) => Ok((tag, rx)),
-            ChannelMessage::Method(_) | ChannelMessage::GetOk(_) => {
-                FrameUnexpected.fail()
-            }
+            ChannelMessage::Method(_) | ChannelMessage::GetOk(_) => FrameUnexpected.fail(),
         }
     }
 
@@ -110,9 +106,7 @@ impl IoLoopHandle {
         self.send(message)?;
         match self.recv()? {
             ChannelMessage::Method(method) => T::try_from(method),
-            ChannelMessage::ConsumeOk(_, _) | ChannelMessage::GetOk(_) => {
-                FrameUnexpected.fail()
-            }
+            ChannelMessage::ConsumeOk(_, _) | ChannelMessage::GetOk(_) => FrameUnexpected.fail(),
         }
     }
 
@@ -148,9 +142,7 @@ impl IoLoopHandle {
     }
 
     fn recv(&mut self) -> Result<ChannelMessage> {
-        self.rx
-            .recv()
-            .map_err(|_| Error::EventLoopDropped)?
+        self.rx.recv().map_err(|_| Error::EventLoopDropped)?
     }
 
     fn check_recv_for_error(&mut self) -> Error {
@@ -183,7 +175,6 @@ impl fmt::Debug for IoLoopHandle0 {
         write!(f, "IoLoopHandle0 {{ .. }}")
     }
 }
-
 
 impl IoLoopHandle0 {
     pub(super) fn new(

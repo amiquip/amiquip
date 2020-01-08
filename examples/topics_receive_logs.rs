@@ -68,4 +68,3 @@ fn main() -> Result<()> {
 
     connection.close()
 }
-

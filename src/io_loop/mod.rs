@@ -335,9 +335,7 @@ impl IoLoop {
                 // but we can detect that if we had gotten up to the Secure state before
                 // failing.
                 return match state {
-                    HandshakeState::Secure(_, _) => {
-                        InvalidCredentials.fail()
-                    }
+                    HandshakeState::Secure(_, _) => InvalidCredentials.fail(),
                     _ => Err(err),
                 };
             }
@@ -352,7 +350,8 @@ impl IoLoop {
             HandshakeState::ServerClosing(close) => ServerClosedConnection {
                 code: close.reply_code,
                 message: close.reply_text,
-            }.fail()
+            }
+            .fail(),
         }
     }
 
@@ -418,7 +417,8 @@ impl IoLoop {
             ConnectionState::ServerClosing(close) => ServerClosedConnection {
                 code: close.reply_code,
                 message: close.reply_text,
-            }.fail(),
+            }
+            .fail(),
             ConnectionState::ClientException => ClientException.fail(),
             ConnectionState::ClientClosed => Ok(()),
         }
@@ -679,7 +679,8 @@ impl Inner {
 
     fn deregister_nonzero_channels(&mut self, poll: &Poll) -> Result<()> {
         for (_, slot) in self.chan_slots.iter() {
-            poll.deregister(&slot.rx).context(DeregisterWithPollHandle)?;
+            poll.deregister(&slot.rx)
+                .context(DeregisterWithPollHandle)?;
         }
         self.channels_are_registered = false;
         Ok(())
@@ -816,7 +817,8 @@ impl Inner {
                     // deregister dance so we can call reregister on this new channel even
                     // though it hadn't existed when we deregistered all the existing
                     // channels.
-                    poll.deregister(&slot.rx).context(DeregisterWithPollHandle)?;
+                    poll.deregister(&slot.rx)
+                        .context(DeregisterWithPollHandle)?;
                 }
                 Ok((slot, handle))
             });

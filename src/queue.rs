@@ -5,12 +5,12 @@ use amq_protocol::protocol::queue::{Declare, Delete};
 ///
 /// The [`default`](#impl-Default) implementation sets all boolean fields to false and has an empty
 /// set of arguments.
-/// 
+///
 /// # Example
-/// 
+///
 /// The [`arguments`](#structfield.arguments) field can be used to declare a
 /// [quorum queue](https://www.rabbitmq.com/quorum-queues.html):
-/// 
+///
 /// ```rust
 /// # use amiquip::{AmqpValue, QueueDeclareOptions, FieldTable};
 /// let mut arguments = FieldTable::new();
