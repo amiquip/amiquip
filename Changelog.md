@@ -1,3 +1,8 @@
+# Version 0.3.3 (2020-01-07)
+
+* Add documentation examples of using the `arguments` fields of
+  `QueueDeclareOptions` and `ConsumerOptions`.
+
 # Version 0.3.2 (2019-08-23)
 
 * Restore `#[doc(hidden)]` attribute with upgrade to snafu 0.4.4.
