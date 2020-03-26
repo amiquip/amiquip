@@ -19,6 +19,10 @@ amiquip = "0.3"
 For usage, see the [documentation](https://docs.rs/amiquip/) and
 [examples](https://github.com/jgallagher/amiquip/tree/master/examples).
 
+## Minimum Support Rust Version
+
+The minimum supported Rust version for amiquip 0.3 is Rust 1.36.0.
+
 ## TLS Support
 
 By default, amiquip enables TLS support via the
