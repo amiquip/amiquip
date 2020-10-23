@@ -135,14 +135,14 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         let mechanism = self.auth.mechanism();
         if !server_supports(&start.mechanisms, &mechanism) {
             return UnsupportedAuthMechanism {
-                available: start.mechanisms.clone(),
+                available: start.mechanisms,
                 requested: mechanism,
             }
             .fail();
         }
         if !server_supports(&start.locales, &self.locale) {
             return UnsupportedLocale {
-                available: start.locales.clone(),
+                available: start.locales,
                 requested: self.locale.clone(),
             }
             .fail();
@@ -308,7 +308,7 @@ mod tests {
             version_major: 0,
             version_minor: 9,
             server_properties: FieldTable::new(),
-            mechanisms: options.auth.mechanism().clone(),
+            mechanisms: options.auth.mechanism(),
             locales: server_locales.to_string(),
         };
 

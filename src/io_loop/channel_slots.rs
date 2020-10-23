@@ -126,7 +126,7 @@ mod tests {
     #[should_panic]
     fn set_channel_max_after_insert_panics() {
         let mut cs = with_channel_max(4);
-        if let Err(_) = cs.insert(Some(1), id) {
+        if cs.insert(Some(1), id).is_err() {
             return;
         }
         cs.set_channel_max(4);
@@ -136,10 +136,10 @@ mod tests {
     #[should_panic]
     fn set_channel_max_after_insert_and_remove_panics() {
         let mut cs = with_channel_max(4);
-        if let Err(_) = cs.insert(Some(1), id) {
+        if cs.insert(Some(1), id).is_err() {
             return;
         }
-        if let None = cs.remove(1) {
+        if cs.remove(1).is_none() {
             return;
         }
         cs.set_channel_max(4);

@@ -5,7 +5,7 @@ use amiquip::{Connection, ConsumerMessage, ConsumerOptions, QueueDeclareOptions,
 use std::thread;
 use std::time::Duration;
 
-const TASK_QUEUE: &'static str = "task_queue";
+const TASK_QUEUE: &str = "task_queue";
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -40,6 +40,7 @@ fn main() -> Result<()> {
 
                 // Sleep for n seconds, where n is the number of '.' chars in the body,
                 // before we ack the message.
+                #[allow(clippy::clippy::naive_bytecount)]
                 let dits = delivery.body.iter().filter(|&&b| b == b'.').count();
                 thread::sleep(Duration::from_secs(dits as u64));
                 println!("({:>3}) ... done sleeping", i);
