@@ -35,6 +35,6 @@ native-tls = { version = "0.2", optional = true }
 built = "0.4"
 
 [dev-dependencies]
-uuid = { version = "0.7", features = [ "v4" ] }
+uuid = { version = "0.8", features = [ "v4" ] }
 env_logger = "0.6"
 mockstream = "0.0.3"
