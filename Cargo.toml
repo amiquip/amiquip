@@ -30,6 +30,7 @@ crossbeam-channel = "0.5"
 indexmap = "1.6"
 url = "1.7"
 native-tls = { version = "0.2", optional = true }
+percent-encoding = "2.1"
 
 [build-dependencies]
 built = "0.4"

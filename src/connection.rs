@@ -420,7 +420,7 @@ mod amqp_url {
     use std::borrow::Cow;
     use std::net::ToSocketAddrs;
     use std::time::Duration;
-    use url::{percent_encoding, Url};
+    use url::Url;
 
     pub fn open(url: &str, tuning: ConnectionTuning, allow_insecure: bool) -> Result<Connection> {
         let mut url = Url::parse(url).context(UrlParseError)?;
