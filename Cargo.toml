@@ -36,5 +36,5 @@ built = "0.4"
 
 [dev-dependencies]
 uuid = { version = "0.8", features = [ "v4" ] }
-env_logger = "0.6"
+env_logger = "0.8"
 mockstream = "0.0.3"
