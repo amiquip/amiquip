@@ -26,7 +26,7 @@ log = "0.4"
 mio = "0.6"
 mio-extras = "2.0"
 cookie-factory = "0.2"
-crossbeam-channel = "0.3"
+crossbeam-channel = "0.5"
 indexmap = "1.0"
 url = "1.7"
 native-tls = { version = "0.2", optional = true }
