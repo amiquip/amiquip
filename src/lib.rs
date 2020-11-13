@@ -11,7 +11,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! amiquip = { version = "0.3", default-features = false }
+//! amiquip = { version = "0.4", default-features = false }
 //! ```
 //!
 //! If you disable TLS support, the methods `Connection::open`, `Connection::open_tuned`, and

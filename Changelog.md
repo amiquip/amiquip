@@ -1,3 +1,10 @@
+# Version 0.4.0 (2020-11-12)
+
+* Upgrade several dependencies. This is a backwards-incompatible change because
+  our public API includes types from dependencies that were upgraded to
+  backwards-incompatible new version.
+* Minimum supported Rust version is now 1.40.0.
+
 # Version 0.3.3 (2020-01-07)
 
 * Add documentation examples of using the `arguments` fields of

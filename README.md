@@ -13,7 +13,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-amiquip = "0.3"
+amiquip = "0.4"
 ```
 
 For usage, see the [documentation](https://docs.rs/amiquip/) and
@@ -21,7 +21,9 @@ For usage, see the [documentation](https://docs.rs/amiquip/) and
 
 ## Minimum Support Rust Version
 
-The minimum supported Rust version for amiquip 0.3 is Rust 1.36.0.
+The minimum supported Rust version for amiquip 0.4 is currently Rust 1.40.0,
+but that may change with a patch release (and could change with a patch release
+to a dependency without our knowledge).
 
 ## TLS Support
 
@@ -31,7 +33,7 @@ support for TLS by turning off default features:
 
 ```toml
 [dependencies]
-amiquip = { version = "0.3", default-features = false }
+amiquip = { version = "0.4", default-features = false }
 ```
 
 If you disable TLS support, the methods `Connection::open`,
