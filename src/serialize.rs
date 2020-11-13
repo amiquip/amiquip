@@ -212,7 +212,7 @@ pub(crate) struct OutputBuffer(Vec<u8>);
 
 impl OutputBuffer {
     pub fn with_protocol_header() -> OutputBuffer {
-        OutputBuffer(Vec::from("AMQP\x00\x00\x09\x01".as_bytes()))
+        OutputBuffer(b"AMQP\x00\x00\x09\x01".to_vec())
     }
 
     pub(crate) fn empty() -> OutputBuffer {

@@ -196,7 +196,10 @@ mod tests {
 
         let mut got = Vec::new();
         let mut buf = make_buffer();
-        let n = buf.read_from(&mut c, |f| Ok(got.push(f))).unwrap();
+        let n = buf.read_from(&mut c, |f| {
+            got.push(f);
+            Ok(())
+        }).unwrap();
 
         assert_eq!(n, 8);
         assert_eq!(got, vec![Vec::from(&frame0[..]), Vec::from(&frame1[..])]);
@@ -227,7 +230,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(n, 2);
-        assert_eq!(got, Some(Vec::from("a\x04aa".as_bytes())));
+        assert_eq!(got, Some(b"a\x04aa".to_vec()));
     }
 
     #[test]
@@ -241,21 +244,30 @@ mod tests {
 
         let mut got = Vec::new();
         let mut buf = make_buffer();
-        let n = buf.read_from(&mut c, |f| Ok(got.push(f))).unwrap();
+        let n = buf.read_from(&mut c, |f| {
+            got.push(f);
+            Ok(())
+        }).unwrap();
         assert_eq!(n, 2);
         assert!(got.is_empty());
 
-        let n = buf.read_from(&mut c, |f| Ok(got.push(f))).unwrap();
+        let n = buf.read_from(&mut c, |f| {
+            got.push(f);
+            Ok(())
+        }).unwrap();
         assert_eq!(n, 5);
-        assert_eq!(got, vec![Vec::from("a\x04aa".as_bytes())]);
+        assert_eq!(got, vec![b"a\x04aa".to_vec()]);
 
-        let n = buf.read_from(&mut c, |f| Ok(got.push(f))).unwrap();
+        let n = buf.read_from(&mut c, |f| {
+            got.push(f);
+            Ok(())
+        }).unwrap();
         assert_eq!(n, 3);
         assert_eq!(
             got,
             vec![
-                Vec::from("a\x04aa".as_bytes()),
-                Vec::from("b\x04bb".as_bytes())
+                b"a\x04aa".to_vec(),
+                b"b\x04bb".to_vec()
             ]
         );
     }

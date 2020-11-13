@@ -432,7 +432,7 @@ mod amqp_url {
                 if allow_insecure {
                     open_amqp(url, options, tuning)
                 } else {
-                    return InsecureUrl { url }.fail();
+                    InsecureUrl { url }.fail()
                 }
             }
             Scheme::Amqps => open_amqps(url, options, tuning),
@@ -457,7 +457,7 @@ mod amqp_url {
             match result {
                 Ok(connection) => return Ok(connection),
                 Err(err) => {
-                    last_err = Some(err.into());
+                    last_err = Some(err);
                 }
             }
         }

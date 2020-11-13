@@ -3,7 +3,7 @@
 use amiquip::{AmqpProperties, Connection, Exchange, Publish, QueueDeclareOptions, Result};
 use std::env;
 
-const TASK_QUEUE: &'static str = "task_queue";
+const TASK_QUEUE: &str = "task_queue";
 
 fn main() -> Result<()> {
     env_logger::init();

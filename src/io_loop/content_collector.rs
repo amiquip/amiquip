@@ -4,6 +4,7 @@ use amq_protocol::frame::AMQPContentHeader;
 use amq_protocol::protocol::basic::Deliver;
 use amq_protocol::protocol::basic::GetOk as AmqpGetOk;
 use amq_protocol::protocol::basic::Return as AmqpReturn;
+use std::cmp::Ordering;
 
 pub(super) struct ContentCollector {
     channel_id: u16,
@@ -233,17 +234,21 @@ impl<T: ContentType> State<T> {
             State::Body(start, header, mut buf) => {
                 let body_size = header.body_size as usize;
                 buf.append(&mut body);
-                if buf.len() == body_size {
-                    Ok(Content::Done(T::new(
-                        channel_id,
-                        start,
-                        buf,
-                        header.properties,
-                    )))
-                } else if buf.len() < body_size {
-                    Ok(Content::NeedMore(State::Body(start, header, buf)))
-                } else {
-                    FrameUnexpected.fail()
+                match buf.len().cmp(&body_size) {
+                    Ordering::Equal => {
+                        Ok(Content::Done(T::new(
+                            channel_id,
+                            start,
+                            buf,
+                            header.properties,
+                        )))
+                    },
+                    Ordering::Less => {
+                        Ok(Content::NeedMore(State::Body(start, header, buf)))
+                    }
+                    _ => {
+                        FrameUnexpected.fail()
+                    }
                 }
             }
             State::Start(_) => FrameUnexpected.fail(),
