@@ -18,23 +18,24 @@ all-features = true
 default = ["native-tls"]
 
 [dependencies]
-snafu = "0.4.4"
-input_buffer = "0.2"
-bytes = "0.4"
+snafu = { version = "0.6", default-features = false, features = ["std"]}
+input_buffer = "0.3"
+bytes = "0.5"
 amq-protocol = "1.4"
 log = "0.4"
 mio = "0.6"
 mio-extras = "2.0"
 cookie-factory = "0.2"
-crossbeam-channel = "0.3"
-indexmap = "1.0"
+crossbeam-channel = "0.5"
+indexmap = "1.6"
 url = "1.7"
 native-tls = { version = "0.2", optional = true }
+percent-encoding = "2.1"
 
 [build-dependencies]
-built = "0.3"
+built = "0.4"
 
 [dev-dependencies]
-uuid = { version = "0.7", features = [ "v4" ] }
-env_logger = "0.6"
+uuid = { version = "0.8", features = [ "v4" ] }
+env_logger = "0.8"
 mockstream = "0.0.3"
