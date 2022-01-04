@@ -73,7 +73,7 @@ impl IoLoopHandle {
         self.send(IoLoopMessage::Send(buf))?;
         match self.recv()? {
             ChannelMessage::GetOk(get) => Ok(*get),
-            ChannelMessage::Method(_) | ChannelMessage::ConsumeOk(_, _) => FrameUnexpected.fail(),
+            ChannelMessage::Method(_) | ChannelMessage::ConsumeOk(_, _) => FrameUnexpectedSnafu.fail(),
         }
     }
 
@@ -85,7 +85,7 @@ impl IoLoopHandle {
         self.send(IoLoopMessage::Send(buf))?;
         match self.recv()? {
             ChannelMessage::ConsumeOk(tag, rx) => Ok((tag, rx)),
-            ChannelMessage::Method(_) | ChannelMessage::GetOk(_) => FrameUnexpected.fail(),
+            ChannelMessage::Method(_) | ChannelMessage::GetOk(_) => FrameUnexpectedSnafu.fail(),
         }
     }
 
@@ -106,7 +106,7 @@ impl IoLoopHandle {
         self.send(message)?;
         match self.recv()? {
             ChannelMessage::Method(method) => T::try_from(method),
-            ChannelMessage::ConsumeOk(_, _) | ChannelMessage::GetOk(_) => FrameUnexpected.fail(),
+            ChannelMessage::ConsumeOk(_, _) | ChannelMessage::GetOk(_) => FrameUnexpectedSnafu.fail(),
         }
     }
 

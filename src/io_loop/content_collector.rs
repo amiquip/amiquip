@@ -31,7 +31,7 @@ impl ContentCollector {
                 self.kind = Some(Kind::Delivery(State::Start(deliver)));
                 Ok(())
             }
-            Some(_) => FrameUnexpected.fail(),
+            Some(_) => FrameUnexpectedSnafu.fail(),
         }
     }
 
@@ -41,7 +41,7 @@ impl ContentCollector {
                 self.kind = Some(Kind::Return(State::Start(return_)));
                 Ok(())
             }
-            Some(_) => FrameUnexpected.fail(),
+            Some(_) => FrameUnexpectedSnafu.fail(),
         }
     }
 
@@ -51,7 +51,7 @@ impl ContentCollector {
                 self.kind = Some(Kind::Get(State::Start(get_ok)));
                 Ok(())
             }
-            Some(_) => FrameUnexpected.fail(),
+            Some(_) => FrameUnexpectedSnafu.fail(),
         }
     }
 
@@ -90,7 +90,7 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
-            None => FrameUnexpected.fail(),
+            None => FrameUnexpectedSnafu.fail(),
         }
     }
 
@@ -126,7 +126,7 @@ impl ContentCollector {
                     Ok(None)
                 }
             },
-            None => FrameUnexpected.fail(),
+            None => FrameUnexpectedSnafu.fail(),
         }
     }
 }
@@ -225,7 +225,7 @@ impl<T: ContentType> State<T> {
                     Ok(Content::NeedMore(State::Body(start, header, buf)))
                 }
             }
-            State::Body(_, _, _) => FrameUnexpected.fail(),
+            State::Body(_, _, _) => FrameUnexpectedSnafu.fail(),
         }
     }
 
@@ -247,11 +247,11 @@ impl<T: ContentType> State<T> {
                         Ok(Content::NeedMore(State::Body(start, header, buf)))
                     }
                     _ => {
-                        FrameUnexpected.fail()
+                        FrameUnexpectedSnafu.fail()
                     }
                 }
             }
-            State::Start(_) => FrameUnexpected.fail(),
+            State::Start(_) => FrameUnexpectedSnafu.fail(),
         }
     }
 }

@@ -56,10 +56,10 @@ impl<T> ChannelSlots<T> {
             None => return self.insert_unused_channel_id(make_entry),
         };
         if channel_id > self.channel_max {
-            return UnavailableChannelId { channel_id }.fail();
+            return UnavailableChannelIdSnafu { channel_id }.fail();
         }
         match self.slots.entry(channel_id) {
-            Entry::Occupied(_) => UnavailableChannelId { channel_id }.fail(),
+            Entry::Occupied(_) => UnavailableChannelIdSnafu { channel_id }.fail(),
             Entry::Vacant(entry) => {
                 let (t, u) = make_entry(channel_id)?;
                 entry.insert(t);
@@ -96,7 +96,7 @@ impl<T> ChannelSlots<T> {
 
         // At the end of our rope for simple channel allocation; fall back to finding
         // one that has been previously freed.
-        let channel_id = self.freed_channel_ids.pop().context(ExhaustedChannelIds)?;
+        let channel_id = self.freed_channel_ids.pop().context(ExhaustedChannelIdsSnafu)?;
         match self.slots.entry(channel_id) {
             Entry::Occupied(_) => unreachable!("free channel id cannot be occupied"),
             Entry::Vacant(entry) => {

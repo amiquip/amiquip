@@ -37,21 +37,21 @@ fn slot_remove(inner: &mut Inner, channel_id: u16) -> Result<ChannelSlot> {
     inner
         .chan_slots
         .remove(channel_id)
-        .context(ReceivedFrameWithBogusChannelId { channel_id })
+        .context(ReceivedFrameWithBogusChannelIdSnafu { channel_id })
 }
 
 fn slot_get(inner: &mut Inner, channel_id: u16) -> Result<&ChannelSlot> {
     inner
         .chan_slots
         .get(channel_id)
-        .context(ReceivedFrameWithBogusChannelId { channel_id })
+        .context(ReceivedFrameWithBogusChannelIdSnafu { channel_id })
 }
 
 fn slot_get_mut(inner: &mut Inner, channel_id: u16) -> Result<&mut ChannelSlot> {
     inner
         .chan_slots
         .get_mut(channel_id)
-        .context(ReceivedFrameWithBogusChannelId { channel_id })
+        .context(ReceivedFrameWithBogusChannelIdSnafu { channel_id })
 }
 
 fn send<T: Send + Sync + 'static>(tx: &Sender<T>, item: T) -> Result<()> {
@@ -62,11 +62,11 @@ fn send<T: Send + Sync + 'static>(tx: &Sender<T>, item: T) -> Result<()> {
         Ok(()) => Ok(()),
         Err(TrySendError::Full(_)) => {
             error!("internal error - bounded channel is unexpectedly full");
-            FrameUnexpected.fail()
+            FrameUnexpectedSnafu.fail()
         }
         Err(TrySendError::Disconnected(_)) => {
             error!("internal error - channel client dropped without being disconnected");
-            EventLoopClientDropped.fail()
+            EventLoopClientDroppedSnafu.fail()
         }
     }
 }
@@ -144,7 +144,7 @@ impl ConnectionState {
             ConnectionState::Steady(ch0_slot) => ch0_slot,
             ConnectionState::ClientException => return Ok(()),
             ConnectionState::ServerClosing(_) | ConnectionState::ClientClosed => {
-                return FrameUnexpected.fail();
+                return FrameUnexpectedSnafu.fail();
             }
         };
 
@@ -157,7 +157,7 @@ impl ConnectionState {
             }
             // We never expect to see a protocl header (we send it to begin the connection)
             // or a heartbeat on a non-0 channel.
-            AMQPFrame::ProtocolHeader | AMQPFrame::Heartbeat(_) => return FrameUnexpected.fail(),
+            AMQPFrame::ProtocolHeader | AMQPFrame::Heartbeat(_) => return FrameUnexpectedSnafu.fail(),
             // Server-initiated connection close.
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
                 inner.push_method(0, AmqpConnection::CloseOk(ConnectionCloseOk {}));
@@ -257,7 +257,7 @@ impl ConnectionState {
                 let slot = slot_get_mut(inner, n)?;
                 match slot.consumers.entry(consumer_tag.clone()) {
                     Entry::Occupied(_) => {
-                        return DuplicateConsumerTag {
+                        return DuplicateConsumerTagSnafu {
                             channel_id: n,
                             consumer_tag,
                         }
@@ -398,7 +398,7 @@ impl ConnectionState {
                             let tx =
                                 slot.consumers
                                     .get(&consumer_tag)
-                                    .context(UnknownConsumerTag {
+                                    .context(UnknownConsumerTagSnafu {
                                         channel_id: n,
                                         consumer_tag,
                                     })?;
@@ -422,7 +422,7 @@ impl ConnectionState {
                             let tx =
                                 slot.consumers
                                     .get(&consumer_tag)
-                                    .context(UnknownConsumerTag {
+                                    .context(UnknownConsumerTagSnafu {
                                         channel_id: n,
                                         consumer_tag,
                                     })?;

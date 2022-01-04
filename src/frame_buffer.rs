@@ -70,7 +70,7 @@ impl FrameKind for AmqpFrameKind {
                 return Ok(frame);
             }
         }
-        MalformedFrame.fail()
+        MalformedFrameSnafu.fail()
     }
 }
 
@@ -116,14 +116,14 @@ impl<Kind: FrameKind> Inner<Kind> {
 
             // need to read more data from the stream to get to a frame
             match self.buf.prepare_reserve(reserve).read_from(stream) {
-                Ok(0) => return UnexpectedSocketClose.fail(),
+                Ok(0) => return UnexpectedSocketCloseSnafu.fail(),
                 Ok(n) => {
                     trace!("read {} bytes", n);
                     bytes_read += n;
                 }
                 Err(err) => match err.kind() {
                     io::ErrorKind::WouldBlock => return Ok(bytes_read),
-                    _ => return Err(err).context(IoErrorReadingSocket),
+                    _ => return Err(err).context(IoErrorReadingSocketSnafu),
                 },
             }
         }
