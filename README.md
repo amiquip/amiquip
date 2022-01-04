@@ -1,6 +1,5 @@
 # amiquip
 
-[![Travis Build Status](https://api.travis-ci.org/jgallagher/amiquip.svg?branch=master)](https://travis-ci.org/jgallagher/amiquip)
 [![dependency status](https://deps.rs/repo/github/jgallagher/amiquip/status.svg)](https://deps.rs/repo/github/jgallagher/amiquip)
 [![Latest Version](https://img.shields.io/crates/v/amiquip.svg)](https://crates.io/crates/amiquip)
 [![Docs](https://docs.rs/amiquip/badge.svg)](https://docs.rs/amiquip)
