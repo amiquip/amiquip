@@ -1,3 +1,15 @@
+# Version 0.4.1 (2022-01-04)
+
+* Upgrade several dependencies:
+  * built (now 0.5.1)
+  * bytes (now 1.1)
+  * env_logger (now 0.9)
+  * input_buffer (now 0.5)
+  * snafu (now 0.7.0)
+  * url (now 2.2.2)
+* Updated README to note that the minimum supported Rust version is now 1.46.0,
+  due to changes in dependencies (not related to the above list).
+
 # Version 0.4.0 (2020-11-12)
 
 * Upgrade several dependencies. This is a backwards-incompatible change because
