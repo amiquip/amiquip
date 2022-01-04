@@ -28,7 +28,7 @@ mio-extras = "2.0"
 cookie-factory = "0.2"
 crossbeam-channel = "0.5"
 indexmap = "1.6"
-url = "1.7"
+url = "2.2.2"
 native-tls = { version = "0.2", optional = true }
 percent-encoding = "2.1"
 
