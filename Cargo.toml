@@ -33,7 +33,7 @@ native-tls = { version = "0.2", optional = true }
 percent-encoding = "2.1"
 
 [build-dependencies]
-built = "0.4"
+built = "0.5.1"
 
 [dev-dependencies]
 uuid = { version = "0.8", features = [ "v4" ] }
