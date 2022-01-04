@@ -18,7 +18,7 @@ all-features = true
 default = ["native-tls"]
 
 [dependencies]
-snafu = { version = "0.6", default-features = false, features = ["std"]}
+snafu = { version = "0.7", default-features = false, features = ["std"]}
 input_buffer = "0.3"
 bytes = "0.5"
 amq-protocol = "1.4"

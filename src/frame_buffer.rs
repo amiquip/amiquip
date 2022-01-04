@@ -70,7 +70,7 @@ impl FrameKind for AmqpFrameKind {
                 return Ok(frame);
             }
         }
-        MalformedFrame.fail()
+        MalformedFrameSnafu.fail()
     }
 }
 
@@ -116,14 +116,14 @@ impl<Kind: FrameKind> Inner<Kind> {
 
             // need to read more data from the stream to get to a frame
             match self.buf.prepare_reserve(reserve).read_from(stream) {
-                Ok(0) => return UnexpectedSocketClose.fail(),
+                Ok(0) => return UnexpectedSocketCloseSnafu.fail(),
                 Ok(n) => {
                     trace!("read {} bytes", n);
                     bytes_read += n;
                 }
                 Err(err) => match err.kind() {
                     io::ErrorKind::WouldBlock => return Ok(bytes_read),
-                    _ => return Err(err).context(IoErrorReadingSocket),
+                    _ => return Err(err).context(IoErrorReadingSocketSnafu),
                 },
             }
         }
@@ -153,7 +153,7 @@ mod tests {
         fn parse_frame(buf: &[u8]) -> Result<Self::Frame> {
             assert!(buf.len() == buf[1] as usize);
             if buf.len() == 6 && &buf[2..] == b"fail" {
-                MalformedFrame.fail()
+                MalformedFrameSnafu.fail()
             } else {
                 Ok(Vec::from(buf))
             }
@@ -291,7 +291,7 @@ mod tests {
 
         // use __Nonexhaustive as "some non-parsing, non-I/O error"
         let mut buf = make_buffer();
-        let res = buf.read_from(&mut c, |_| __Nonexhaustive.fail());
+        let res = buf.read_from(&mut c, |_| __NonexhaustiveSnafu.fail());
         assert!(res.is_err());
         match res.unwrap_err() {
             Error::__Nonexhaustive => (),

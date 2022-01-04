@@ -423,7 +423,7 @@ mod amqp_url {
     use url::Url;
 
     pub fn open(url: &str, tuning: ConnectionTuning, allow_insecure: bool) -> Result<Connection> {
-        let mut url = Url::parse(url).context(UrlParseError)?;
+        let mut url = Url::parse(url).context(UrlParseSnafu)?;
         let scheme = populate_host_and_port(&mut url)?;
         let options = decode(&url)?;
 
@@ -432,7 +432,7 @@ mod amqp_url {
                 if allow_insecure {
                     open_amqp(url, options, tuning)
                 } else {
-                    InsecureUrl { url }.fail()
+                    InsecureUrlSnafu { url }.fail()
                 }
             }
             Scheme::Amqps => open_amqps(url, options, tuning),
@@ -447,10 +447,10 @@ mod amqp_url {
         let mut last_err: Option<Error> = None;
         for addr in url
             .to_socket_addrs()
-            .with_context(|| ResolveUrlToSocketAddr { url: url.clone() })?
+            .with_context(|_| ResolveUrlToSocketAddrSnafu { url: url.clone() })?
         {
             let result = TcpStream::connect(&addr)
-                .with_context(|| FailedToConnect { url: url.clone() })
+                .with_context(|_| FailedToConnectSnafu { url: url.clone() })
                 .and_then(|stream| {
                     Connection::insecure_open_stream(stream, options.clone(), tuning.clone())
                 });
@@ -477,17 +477,17 @@ mod amqp_url {
         tuning: ConnectionTuning,
     ) -> Result<Connection> {
         let mut last_err: Option<Error> = None;
-        let connector = native_tls::TlsConnector::new().context(CreateTlsConnector)?;
+        let connector = native_tls::TlsConnector::new().context(CreateTlsConnectorSnafu)?;
         let domain = match url.domain() {
             Some(domain) => domain,
-            None => return UrlMissingDomain { url: url.clone() }.fail(),
+            None => return UrlMissingDomainSnafu { url: url.clone() }.fail(),
         };
         for addr in url
             .to_socket_addrs()
-            .with_context(|| ResolveUrlToSocketAddr { url: url.clone() })?
+            .with_context(|_| ResolveUrlToSocketAddrSnafu { url: url.clone() })?
         {
             let result = TcpStream::connect(&addr)
-                .with_context(|| FailedToConnect { url: url.clone() })
+                .with_context(|_| FailedToConnectSnafu { url: url.clone() })
                 .and_then(|stream| {
                     Connection::open_tls_stream(
                         connector.clone(),
@@ -516,7 +516,7 @@ mod amqp_url {
 
     fn populate_host_and_port(url: &mut Url) -> Result<Scheme> {
         if !url.has_host() || url.host_str() == Some("") {
-            url.set_host(Some("localhost")).context(UrlParseError)?;
+            url.set_host(Some("localhost")).context(UrlParseSnafu)?;
         }
         match url.scheme() {
             "amqp" => {
@@ -529,7 +529,7 @@ mod amqp_url {
                     .map_err(|()| Error::SpecifyUrlPort { url: url.clone() })?;
                 Ok(Scheme::Amqps)
             }
-            _ => InvalidUrlScheme { url: url.clone() }.fail(),
+            _ => InvalidUrlSchemeSnafu { url: url.clone() }.fail(),
         }
     }
 
@@ -555,7 +555,7 @@ mod amqp_url {
 
             // make sure there are no other path segments
             if path_segments.next().is_some() {
-                return ExtraUrlPathSegments { url: url.clone() }.fail();
+                return ExtraUrlPathSegmentsSnafu { url: url.clone() }.fail();
             }
         }
 
@@ -576,26 +576,26 @@ mod amqp_url {
                 "heartbeat" => {
                     let v = v
                         .parse::<u16>()
-                        .with_context(|| UrlParseHeartbeat { url: url.clone() })?;
+                        .with_context(|_| UrlParseHeartbeatSnafu { url: url.clone() })?;
                     options = options.heartbeat(v);
                 }
                 "channel_max" => {
                     let v = v
                         .parse::<u16>()
-                        .with_context(|| UrlParseChannelMax { url: url.clone() })?;
+                        .with_context(|_| UrlParseChannelMaxSnafu { url: url.clone() })?;
                     options = options.channel_max(v);
                 }
                 "connection_timeout" => {
                     let v = v
                         .parse::<u64>()
-                        .with_context(|| UrlParseConnectionTimeout { url: url.clone() })?;
+                        .with_context(|_| UrlParseConnectionTimeoutSnafu { url: url.clone() })?;
                     options = options.connection_timeout(Some(Duration::from_millis(v)));
                 }
                 "auth_mechanism" => {
                     if v == "external" {
                         options = options.auth(Auth::External);
                     } else {
-                        return UrlInvalidAuthMechanism {
+                        return UrlInvalidAuthMechanismSnafu {
                             url: url.clone(),
                             mechanism: v,
                         }
@@ -603,7 +603,7 @@ mod amqp_url {
                     }
                 }
                 parameter => {
-                    return UrlUnsupportedParameter {
+                    return UrlUnsupportedParameterSnafu {
                         url: url.clone(),
                         parameter,
                     }

@@ -8,7 +8,7 @@ pub type Result<T, E = Error> = result::Result<T, E>;
 
 /// Specific error cases returned by amiquip.
 #[derive(Snafu, Debug)]
-#[snafu(visibility = "pub(crate)")]
+#[snafu(visibility(pub(crate)))]
 pub enum Error {
     /// URL parsing failed.
     #[snafu(display("could not parse url: {}", source))]

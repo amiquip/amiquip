@@ -42,7 +42,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 // need a secure/secure-ok
                 if let Ok(secure) = Secure::try_from(0, frame.clone()) {
                     error!("received unsupported handshake {:?}", secure);
-                    return SaslSecureNotSupported.fail();
+                    return SaslSecureNotSupportedSnafu.fail();
                 }
                 *self = HandshakeState::Tune(options.clone(), server_properties.clone());
                 return self.process(inner, frame);
@@ -78,7 +78,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 *self = HandshakeState::Done(tune_ok.clone(), server_properties.clone());
             }
             HandshakeState::ServerClosing(_) | HandshakeState::Done(_, _) => {
-                return FrameUnexpected.fail();
+                return FrameUnexpectedSnafu.fail();
             }
         }
         Ok(())

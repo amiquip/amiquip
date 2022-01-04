@@ -134,14 +134,14 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         // ensure our requested auth mechanism and locale are available
         let mechanism = self.auth.mechanism();
         if !server_supports(&start.mechanisms, &mechanism) {
-            return UnsupportedAuthMechanism {
+            return UnsupportedAuthMechanismSnafu {
                 available: start.mechanisms,
                 requested: mechanism,
             }
             .fail();
         }
         if !server_supports(&start.locales, &self.locale) {
-            return UnsupportedLocale {
+            return UnsupportedLocaleSnafu {
                 available: start.locales,
                 requested: self.locale.clone(),
             }
@@ -213,7 +213,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         let heartbeat = u16::min(tune.heartbeat, self.heartbeat);
 
         if frame_max < u32::from(FRAME_MIN_SIZE) {
-            return FrameMaxTooSmall {
+            return FrameMaxTooSmallSnafu {
                 min: u32::from(FRAME_MIN_SIZE),
                 requested: frame_max,
             }

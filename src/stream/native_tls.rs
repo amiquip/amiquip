@@ -16,7 +16,7 @@ impl TlsConnector {
         let inner = Some(match self.0.connect(domain, stream) {
             Ok(s) => InnerHandshake::Done(s),
             Err(HandshakeError::WouldBlock(s)) => InnerHandshake::MidHandshake(s),
-            Err(HandshakeError::Failure(err)) => Err(err).context(TlsHandshake)?,
+            Err(HandshakeError::Failure(err)) => Err(err).context(TlsHandshakeSnafu)?,
         });
         Ok(TlsHandshakeStream { inner })
     }
@@ -61,7 +61,7 @@ impl<S: Evented + Read + Write + Send + 'static> HandshakeStream for TlsHandshak
                 self.inner = Some(InnerHandshake::MidHandshake(s));
                 Ok(None)
             }
-            Err(HandshakeError::Failure(err)) => Err(err).context(TlsHandshake)?,
+            Err(HandshakeError::Failure(err)) => Err(err).context(TlsHandshakeSnafu)?,
         }
     }
 }

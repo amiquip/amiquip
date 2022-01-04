@@ -148,14 +148,14 @@ impl IoLoop {
     pub(crate) fn new(tuning: ConnectionTuning) -> Result<Self> {
         let heartbeats = HeartbeatTimers::default();
 
-        let poll = Poll::new().context(CreatePollHandle)?;
+        let poll = Poll::new().context(CreatePollHandleSnafu)?;
         poll.register(
             &heartbeats.timer,
             HEARTBEAT,
             Ready::readable(),
             PollOpt::edge(),
         )
-        .context(RegisterWithPollHandle)?;
+        .context(RegisterWithPollHandleSnafu)?;
 
         Ok(IoLoop {
             poll,
@@ -174,7 +174,7 @@ impl IoLoop {
     ) -> Result<(JoinHandle<Result<()>>, FieldTable, Channel0Handle)> {
         self.poll
             .register(&stream, STREAM, Ready::writable(), PollOpt::edge())
-            .context(RegisterWithPollHandle)?;
+            .context(RegisterWithPollHandleSnafu)?;
 
         self.connection_timeout = options.connection_timeout.take();
         let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
@@ -183,7 +183,7 @@ impl IoLoop {
         let join_handle = Builder::new()
             .name("amiquip-io".to_string())
             .spawn(move || self.thread_main(stream, options, handshake_done_tx, ch0_slot, false))
-            .context(ForkFailed)?;
+            .context(ForkFailedSnafu)?;
 
         IoLoop::wait_for_amqp_handshake(ch0_handle, join_handle, handshake_done_rx)
     }
@@ -201,7 +201,7 @@ impl IoLoop {
                 Ready::readable() | Ready::writable(),
                 PollOpt::edge(),
             )
-            .context(RegisterWithPollHandle)?;
+            .context(RegisterWithPollHandleSnafu)?;
 
         self.connection_timeout = options.connection_timeout.take();
         let (handshake_done_tx, handshake_done_rx) = crossbeam_channel::bounded(1);
@@ -210,7 +210,7 @@ impl IoLoop {
         let join_handle = Builder::new()
             .name("amiquip-io".to_string())
             .spawn(move || self.thread_main_tls(stream, options, handshake_done_tx, ch0_slot))
-            .context(ForkFailed)?;
+            .context(ForkFailedSnafu)?;
 
         IoLoop::wait_for_amqp_handshake(ch0_handle, join_handle, handshake_done_rx)
     }
@@ -234,7 +234,7 @@ impl IoLoop {
                     unreachable!("I/O thread ended successfully without completing handshake")
                 }
                 Ok(Err(err)) => Err(err),
-                Err(_) => IoThreadPanic.fail(),
+                Err(_) => IoThreadPanicSnafu.fail(),
             },
         }
     }
@@ -286,7 +286,7 @@ impl IoLoop {
                 Ready::readable(),
                 PollOpt::edge(),
             )
-            .context(RegisterWithPollHandle)?;
+            .context(RegisterWithPollHandleSnafu)?;
         self.poll
             .register(
                 &ch0_slot.set_blocked_rx,
@@ -294,7 +294,7 @@ impl IoLoop {
                 Ready::readable(),
                 PollOpt::edge(),
             )
-            .context(RegisterWithPollHandle)?;
+            .context(RegisterWithPollHandleSnafu)?;
         self.poll
             .register(
                 &ch0_slot.alloc_chan_req_rx,
@@ -302,7 +302,7 @@ impl IoLoop {
                 Ready::readable(),
                 PollOpt::edge(),
             )
-            .context(RegisterWithPollHandle)?;
+            .context(RegisterWithPollHandleSnafu)?;
         let (tune_ok, server_properties) =
             self.run_amqp_handshake(&mut stream, options, have_written_to_socket)?;
         let channel_max = tune_ok.channel_max;
@@ -335,7 +335,7 @@ impl IoLoop {
                 // but we can detect that if we had gotten up to the Secure state before
                 // failing.
                 return match state {
-                    HandshakeState::Secure(_, _) => InvalidCredentials.fail(),
+                    HandshakeState::Secure(_, _) => InvalidCredentialsSnafu.fail(),
                     _ => Err(err),
                 };
             }
@@ -347,7 +347,7 @@ impl IoLoop {
             | HandshakeState::Tune(_, _)
             | HandshakeState::Open(_, _) => unreachable!(),
             HandshakeState::Done(tune_ok, server_properties) => Ok((tune_ok, server_properties)),
-            HandshakeState::ServerClosing(close) => ServerClosedConnection {
+            HandshakeState::ServerClosing(close) => ServerClosedConnectionSnafu {
                 code: close.reply_code,
                 message: close.reply_text,
             }
@@ -414,12 +414,12 @@ impl IoLoop {
         )?;
         match state {
             ConnectionState::Steady(_) => unreachable!(),
-            ConnectionState::ServerClosing(close) => ServerClosedConnection {
+            ConnectionState::ServerClosing(close) => ServerClosedConnectionSnafu {
                 code: close.reply_code,
                 message: close.reply_text,
             }
             .fail(),
-            ConnectionState::ClientException => ClientException.fail(),
+            ConnectionState::ClientException => ClientExceptionSnafu.fail(),
             ConnectionState::ClientClosed => Ok(()),
         }
     }
@@ -485,7 +485,7 @@ impl IoLoop {
             let tx = match ch0_slot.set_blocked_rx.try_recv() {
                 Ok(tx) => tx,
                 Err(TryRecvError::Empty) => return Ok(()),
-                Err(TryRecvError::Disconnected) => return EventLoopClientDropped.fail(),
+                Err(TryRecvError::Disconnected) => return EventLoopClientDroppedSnafu.fail(),
             };
             ch0_slot.blocked_tx = Some(tx);
         }
@@ -541,7 +541,7 @@ impl IoLoop {
                     Ready::readable() | Ready::writable(),
                     PollOpt::edge(),
                 )
-                .context(RegisterWithPollHandle)?;
+                .context(RegisterWithPollHandleSnafu)?;
         }
 
         let mut events = Events::with_capacity(128);
@@ -550,11 +550,11 @@ impl IoLoop {
             let start_poll = Instant::now();
             self.poll
                 .poll(&mut events, self.connection_timeout)
-                .context(FailedToPoll)?;
+                .context(FailedToPollSnafu)?;
             if events.is_empty() {
                 if let Some(timeout) = &self.connection_timeout {
                     if start_poll.elapsed() > *timeout {
-                        return ConnectionTimeout.fail();
+                        return ConnectionTimeoutSnafu.fail();
                     }
                 }
                 continue;
@@ -604,13 +604,13 @@ impl IoLoop {
                         Ready::readable() | Ready::writable(),
                         PollOpt::edge(),
                     )
-                    .context(RegisterWithPollHandle)?;
+                    .context(RegisterWithPollHandleSnafu)?;
             } else if had_data_to_write {
                 trace!("reregistering socket for readable only");
                 have_written_to_socket = true;
                 self.poll
                     .reregister(stream, STREAM, Ready::readable(), PollOpt::edge())
-                    .context(RegisterWithPollHandle)?;
+                    .context(RegisterWithPollHandleSnafu)?;
             }
         }
     }
@@ -680,7 +680,7 @@ impl Inner {
     fn deregister_nonzero_channels(&mut self, poll: &Poll) -> Result<()> {
         for (_, slot) in self.chan_slots.iter() {
             poll.deregister(&slot.rx)
-                .context(DeregisterWithPollHandle)?;
+                .context(DeregisterWithPollHandleSnafu)?;
         }
         self.channels_are_registered = false;
         Ok(())
@@ -694,7 +694,7 @@ impl Inner {
                 Ready::readable(),
                 PollOpt::edge(),
             )
-            .context(RegisterWithPollHandle)?;
+            .context(RegisterWithPollHandleSnafu)?;
         }
         self.channels_are_registered = true;
         Ok(())
@@ -709,7 +709,7 @@ impl Inner {
                     }
                     HeartbeatState::Expired => {
                         error!("missed heartbeats from server - closing connection");
-                        return MissedServerHeartbeats.fail();
+                        return MissedServerHeartbeatsSnafu.fail();
                     }
                 },
                 HeartbeatKind::Tx => match self.heartbeats.fire_tx() {
@@ -737,7 +737,7 @@ impl Inner {
             match ch0_slot.common.rx.try_recv() {
                 Ok(message) => self.process_channel_message(0, message)?,
                 Err(TryRecvError::Empty) => return Ok(()),
-                Err(TryRecvError::Disconnected) => return EventLoopClientDropped.fail(),
+                Err(TryRecvError::Disconnected) => return EventLoopClientDroppedSnafu.fail(),
             }
         }
     }
@@ -760,7 +760,7 @@ impl Inner {
             match slot.rx.try_recv() {
                 Ok(message) => self.process_channel_message(channel_id, message)?,
                 Err(TryRecvError::Empty) => return Ok(()),
-                Err(TryRecvError::Disconnected) => return EventLoopClientDropped.fail(),
+                Err(TryRecvError::Disconnected) => return EventLoopClientDroppedSnafu.fail(),
             }
         }
     }
@@ -797,7 +797,7 @@ impl Inner {
             let new_channel_id = match ch0_slot.alloc_chan_req_rx.try_recv() {
                 Ok(new_channel_id) => new_channel_id,
                 Err(TryRecvError::Empty) => return Ok(()),
-                Err(TryRecvError::Disconnected) => return EventLoopClientDropped.fail(),
+                Err(TryRecvError::Disconnected) => return EventLoopClientDroppedSnafu.fail(),
             };
 
             let mio_channel_bound = self.mio_channel_bound;
@@ -810,7 +810,7 @@ impl Inner {
                     Ready::readable(),
                     PollOpt::edge(),
                 )
-                .context(RegisterWithPollHandle)?;
+                .context(RegisterWithPollHandleSnafu)?;
                 if !channels_are_registered {
                     // If we're currently in a deregistered state (i.e., too much data to
                     // write), go ahead and deregister this new channel. We do the register+
@@ -818,7 +818,7 @@ impl Inner {
                     // though it hadn't existed when we deregistered all the existing
                     // channels.
                     poll.deregister(&slot.rx)
-                        .context(DeregisterWithPollHandle)?;
+                        .context(DeregisterWithPollHandleSnafu)?;
                 }
                 Ok((slot, handle))
             });
@@ -875,7 +875,7 @@ impl Inner {
                         self.outbuf.drain_written(pos);
                         return Ok(());
                     }
-                    _ => return Err(err).context(IoErrorWritingSocket),
+                    _ => return Err(err).context(IoErrorWritingSocketSnafu),
                 },
             };
             pos += n;

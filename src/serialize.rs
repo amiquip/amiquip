@@ -25,7 +25,7 @@ macro_rules! impl_try_from_class {
             fn try_from(class: AMQPClass) -> Result<Self> {
                 match class {
                     $class($method(val)) => Ok(val),
-                    _ => FrameUnexpected.fail(),
+                    _ => FrameUnexpectedSnafu.fail(),
                 }
             }
         }
@@ -159,10 +159,10 @@ impl<T: TryFromAmqpClass> TryFromAmqpFrame for T {
                 if expected_id == channel_id {
                     Self::try_from(method)
                 } else {
-                    FrameUnexpected.fail()
+                    FrameUnexpectedSnafu.fail()
                 }
             }
-            _ => FrameUnexpected.fail(),
+            _ => FrameUnexpectedSnafu.fail(),
         }
     }
 }
