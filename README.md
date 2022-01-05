@@ -1,6 +1,5 @@
 # amiquip
 
-[![Travis Build Status](https://api.travis-ci.org/jgallagher/amiquip.svg?branch=master)](https://travis-ci.org/jgallagher/amiquip)
 [![dependency status](https://deps.rs/repo/github/jgallagher/amiquip/status.svg)](https://deps.rs/repo/github/jgallagher/amiquip)
 [![Latest Version](https://img.shields.io/crates/v/amiquip.svg)](https://crates.io/crates/amiquip)
 [![Docs](https://docs.rs/amiquip/badge.svg)](https://docs.rs/amiquip)
@@ -21,7 +20,7 @@ For usage, see the [documentation](https://docs.rs/amiquip/) and
 
 ## Minimum Support Rust Version
 
-The minimum supported Rust version for amiquip 0.4 is currently Rust 1.40.0,
+The minimum supported Rust version for amiquip 0.4.1 is currently Rust 1.46.0,
 but that may change with a patch release (and could change with a patch release
 to a dependency without our knowledge).
 

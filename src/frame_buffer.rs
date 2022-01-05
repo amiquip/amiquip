@@ -95,7 +95,7 @@ impl<Kind: FrameKind> Inner<Kind> {
         let mut bytes_read = 0;
 
         loop {
-            let bytes = self.buf.bytes();
+            let bytes = self.buf.chunk();
             let frame_size = Kind::parse_size(bytes);
             let mut reserve = MIN_READ;
 

@@ -418,7 +418,6 @@ mod amqp_url {
     use mio::net::TcpStream;
     use snafu::ResultExt;
     use std::borrow::Cow;
-    use std::net::ToSocketAddrs;
     use std::time::Duration;
     use url::Url;
 
@@ -446,7 +445,7 @@ mod amqp_url {
     ) -> Result<Connection> {
         let mut last_err: Option<Error> = None;
         for addr in url
-            .to_socket_addrs()
+            .socket_addrs(|| None)
             .with_context(|_| ResolveUrlToSocketAddrSnafu { url: url.clone() })?
         {
             let result = TcpStream::connect(&addr)
@@ -483,7 +482,7 @@ mod amqp_url {
             None => return UrlMissingDomainSnafu { url: url.clone() }.fail(),
         };
         for addr in url
-            .to_socket_addrs()
+            .socket_addrs(|| None)
             .with_context(|_| ResolveUrlToSocketAddrSnafu { url: url.clone() })?
         {
             let result = TcpStream::connect(&addr)
@@ -652,7 +651,7 @@ mod amqp_url {
 
         #[test]
         fn user_pass() {
-            let options = decode_s("amqp://user:pass@/").unwrap();
+            let options = decode_s("amqp://user:pass@localhost/").unwrap();
             assert_eq!(
                 options,
                 ConnectionOptions::default().auth(Auth::Plain {
@@ -660,7 +659,7 @@ mod amqp_url {
                     password: "pass".to_string()
                 })
             );
-            let options = decode_s("amqp://user%61:pass%62@/").unwrap();
+            let options = decode_s("amqp://user%61:pass%62@localhost/").unwrap();
             assert_eq!(
                 options,
                 ConnectionOptions::default().auth(Auth::Plain {
@@ -703,10 +702,6 @@ mod amqp_url {
             populate_host_and_port(&mut url).unwrap();
             assert_eq!(url.host_str(), Some("localhost"));
 
-            let mut url = Url::parse("amqp://:35").unwrap();
-            populate_host_and_port(&mut url).unwrap();
-            assert_eq!(url.host_str(), Some("localhost"));
-
             let mut url = Url::parse("amqp://foo.com").unwrap();
             populate_host_and_port(&mut url).unwrap();
             assert_eq!(url.host_str(), Some("foo.com"));
@@ -722,11 +717,11 @@ mod amqp_url {
             populate_host_and_port(&mut url).unwrap();
             assert_eq!(url.port(), Some(5671));
 
-            let mut url = Url::parse("amqp://:35").unwrap();
+            let mut url = Url::parse("amqp://foo.com:35").unwrap();
             populate_host_and_port(&mut url).unwrap();
             assert_eq!(url.port(), Some(35));
 
-            let mut url = Url::parse("amqps://:35").unwrap();
+            let mut url = Url::parse("amqps://foo.com:35").unwrap();
             populate_host_and_port(&mut url).unwrap();
             assert_eq!(url.port(), Some(35));
         }
