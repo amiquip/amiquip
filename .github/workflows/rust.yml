@@ -20,5 +20,5 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: |
-        cargo test --verbose
+        cargo test --no-default-features --verbose
         cargo test --features native-tls --verbose

@@ -466,7 +466,7 @@ mod amqp_url {
 
     #[cfg(not(feature = "native-tls"))]
     fn open_amqps(_: Url, _: ConnectionOptions<Auth>, _: ConnectionTuning) -> Result<Connection> {
-        TlsFeatureNotEnabled.fail()
+        TlsFeatureNotEnabledSnafu.fail()
     }
 
     #[cfg(feature = "native-tls")]

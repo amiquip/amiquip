@@ -1,3 +1,8 @@
+# Version 0.4.2 (2022-01-12)
+
+* Fix compilation error with default features disabled (#36)
+  * Add --no-default-features to CI
+
 # Version 0.4.1 (2022-01-04)
 
 * Upgrade several dependencies:
