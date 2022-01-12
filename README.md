@@ -20,7 +20,7 @@ For usage, see the [documentation](https://docs.rs/amiquip/) and
 
 ## Minimum Support Rust Version
 
-The minimum supported Rust version for amiquip 0.4.1 is currently Rust 1.46.0,
+The minimum supported Rust version for amiquip 0.4.2 is currently Rust 1.46.0,
 but that may change with a patch release (and could change with a patch release
 to a dependency without our knowledge).
 
