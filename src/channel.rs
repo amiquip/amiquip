@@ -524,6 +524,20 @@ impl Channel {
             internal: false,
             arguments: FieldTable::new(),
         };
+        self.exchange_declare_passive_advanced(type_, exchange, options)
+    }
+
+    /// Passively  declare an exchange named `exchange` with the given type and options.
+    ///
+    /// If the server cannot declare the exchange (e.g., if the exchange already exists with a
+    /// different type or options that conflict with `options`), it will close this channel.
+    pub fn exchange_declare_passive_advanced<S: Into<String>>(
+        &self,
+        type_: ExchangeType,
+        exchange: S,
+        options: ExchangeDeclareOptions,
+    ) -> Result<Exchange> {
+        let exchange = exchange.into();
         let declare =
             AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), true, false));
         self.call::<_, ExchangeDeclareOk>(declare)
