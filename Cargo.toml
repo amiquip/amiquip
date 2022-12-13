@@ -3,6 +3,7 @@ name = "amiquip"
 version = "0.4.2"
 authors = ["John Gallagher <johnkgallagher@gmail.com>"]
 edition = "2018"
+rust-version = "1.60"
 build = "build.rs"
 description = "Pure Rust RabbitMQ client"
 repository = "https://github.com/jgallagher/amiquip"
@@ -16,6 +17,7 @@ all-features = true
 
 [features]
 default = ["native-tls"]
+vendored-tls = ["native-tls?/vendored"]
 
 [dependencies]
 snafu = { version = "0.7", default-features = false, features = ["std"]}
