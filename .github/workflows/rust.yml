@@ -21,4 +21,6 @@ jobs:
     - name: Run tests
       run: |
         cargo test --no-default-features --verbose
-        cargo test --features native-tls --verbose
+        cargo test --verbose
+        cargo test --no-default-features --features native-tls --verbose
+        cargo test --no-default-features --features rustls-tls --verbose

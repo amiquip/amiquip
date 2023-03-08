@@ -16,6 +16,10 @@ impl IoStream for TcpStream {}
 
 #[cfg(feature = "native-tls")]
 mod native_tls;
+#[cfg(feature  = "rustls-tls")]
+mod rustls_tls;
 
 #[cfg(feature = "native-tls")]
 pub use self::native_tls::TlsConnector;
+#[cfg(feature  = "rustls-tls")]
+pub use self::rustls_tls::TlsConnector;

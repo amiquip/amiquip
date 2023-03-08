@@ -6,8 +6,9 @@
 //! Most errors, however, do result in effectively killing the channel or connection on which they
 //! occur.
 //!
-//! TLS support is enabled by default via the [native-tls](https://crates.io/crates/native-tls)
-//! crate. To enable disable TLS support at build time, disable amiquip's default features:
+//! By default, amiquip enables TLS support via the
+//! [native-tls](https://crates.io/crates/native-tls) crate. You can switch to using [rusttls](https://github.com/rustls/rustls) through the `rusttls-tls` feature. You can disable
+//! support for TLS by turning off default features:
 //!
 //! ```toml
 //! [dependencies]
@@ -202,6 +203,9 @@ pub use return_::Return;
 pub use stream::IoStream;
 
 #[cfg(feature = "native-tls")]
+pub use stream::TlsConnector;
+
+#[cfg(feature = "rustls-tls")]
 pub use stream::TlsConnector;
 
 pub use amq_protocol::protocol::basic::AMQPProperties as AmqpProperties;
