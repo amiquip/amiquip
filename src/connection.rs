@@ -6,7 +6,7 @@ use crossbeam_channel::Receiver;
 use log::debug;
 use std::thread::JoinHandle;
 
-#[cfg(feature = "native-tls")]
+#[cfg(feature = "__tls")]
 use crate::TlsConnector;
 
 /// Asynchronous notifications sent by the server when it temporarily blocks a connection,
@@ -258,8 +258,8 @@ impl Connection {
 
     /// Open an encrypted AMQP connection on a stream (typically a `mio::net::TcpStream`)
     /// using the provided [`TlsConnector`](struct.TlsConnector.html).
-    #[cfg(feature = "native-tls")]
-    pub fn open_tls_stream<Auth: Sasl, C: Into<TlsConnector>, S: IoStream>(
+    #[cfg(feature = "__tls")]
+    pub fn open_tls_stream<Auth: Sasl, C: Into<TlsConnector>, S: IoStream + std::fmt::Debug + std::marker::Sync + std::marker::Send>(
         connector: C,
         domain: &str,
         stream: S,
@@ -280,7 +280,7 @@ impl Connection {
     ///
     /// Consider using [`open_tls_stream`](#method.open_tls_stream) instead, unless you are sure an
     /// insecure connection is acceptable (e.g., you're connecting to `localhost`).
-    pub fn insecure_open_stream<Auth: Sasl, S: IoStream>(
+    pub fn insecure_open_stream<Auth: Sasl, S: IoStream >(
         stream: S,
         options: ConnectionOptions<Auth>,
         tuning: ConnectionTuning,
@@ -464,19 +464,25 @@ mod amqp_url {
         Err(last_err)
     }
 
-    #[cfg(not(feature = "native-tls"))]
+    #[cfg(not(feature = "__tls"))]
     fn open_amqps(_: Url, _: ConnectionOptions<Auth>, _: ConnectionTuning) -> Result<Connection> {
         TlsFeatureNotEnabledSnafu.fail()
     }
 
-    #[cfg(feature = "native-tls")]
+    #[cfg(feature = "__tls")]
     fn open_amqps(
         url: Url,
         options: ConnectionOptions<Auth>,
         tuning: ConnectionTuning,
     ) -> Result<Connection> {
         let mut last_err: Option<Error> = None;
-        let connector = native_tls::TlsConnector::new().context(CreateTlsConnectorSnafu)?;
+        #[cfg(feature = "native-tls")]
+        let connector = native_tls_crate::TlsConnector::new().context(CreateTlsConnectorSnafu)?;
+        #[cfg(feature = "rustls-tls-native-roots")]
+        let connector = rustls_connector::RustlsConnector::new_with_native_certs()?;
+        #[cfg(feature = "rustls-tls-webpki-roots")]
+        let connector = rustls_connector::RustlsConnector::new_with_webpki_roots_certs();
+
         let domain = match url.domain() {
             Some(domain) => domain,
             None => return UrlMissingDomainSnafu { url: url.clone() }.fail(),

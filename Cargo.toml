@@ -17,6 +17,16 @@ all-features = true
 [features]
 default = ["native-tls"]
 
+native-tls = ["native-tls-crate", "__tls"]
+
+rustls-tls = ["rustls-tls-webpki-roots"]
+rustls-tls-manual-roots = ["__rustls"]
+rustls-tls-webpki-roots = ["rustls-connector/webpki-roots-certs", "webpki-roots", "__rustls"]
+rustls-tls-native-roots = ["rustls-connector/native-certs", "rustls-native-certs", "__rustls"]
+
+__rustls = ["rustls", "rustls-connector", "__tls"]
+__tls = []
+
 [dependencies]
 snafu = { version = "0.7", default-features = false, features = ["std"]}
 input_buffer = "0.5"
@@ -29,8 +39,14 @@ cookie-factory = "0.2"
 crossbeam-channel = "0.5"
 indexmap = "1.6"
 url = "2.2.2"
-native-tls = { version = "0.2", optional = true }
 percent-encoding = "2.1"
+
+rustls = { version = "0.20", features = ["dangerous_configuration"], optional = true }
+rustls-connector = { version = "0.16.1", optional = true }
+webpki-roots = { version = "0.22", optional = true }
+rustls-native-certs = { version = "0.6", optional = true }
+
+native-tls-crate = { version = "0.2.10", optional = true, package = "native-tls" }
 
 [build-dependencies]
 built = "0.5.1"

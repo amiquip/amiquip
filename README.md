@@ -26,8 +26,9 @@ to a dependency without our knowledge).
 
 ## TLS Support
 
+
 By default, amiquip enables TLS support via the
-[native-tls](https://crates.io/crates/native-tls) crate. You can disable
+[native-tls](https://crates.io/crates/native-tls) crate. You can switch to using [rusttls](https://github.com/rustls/rustls) through the `rusttls-tls` feature. You can disable
 support for TLS by turning off default features:
 
 ```toml

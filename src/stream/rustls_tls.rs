@@ -3,14 +3,17 @@ use crate::errors::*;
 use mio::{Evented, Poll, PollOpt, Ready, Token};
 use snafu::ResultExt;
 use std::io::{self, Read, Write};
-use native_tls_crate::{MidHandshakeTlsStream, HandshakeError};
+use std::marker::{Sync, Send};
+use std::fmt::Debug;
+use rustls_connector::{MidHandshakeTlsStream, HandshakeError};
+
 /// Newtype wrapper around a `native_tls::TlsConnector` to make it usable by amiquip's I/O loop.
-pub struct TlsConnector(native_tls_crate::TlsConnector);
+pub struct TlsConnector(rustls_connector::RustlsConnector);
 
 impl TlsConnector {
     pub(crate) fn connect<S>(&self, domain: &str, stream: S) -> Result<TlsHandshakeStream<S>>
     where
-        S: Read + Write,
+        S: Read + Write + Debug + Sync + Send + 'static,
     {
         let inner = Some(match self.0.connect(domain, stream) {
             Ok(s) => InnerHandshake::Done(s),
@@ -22,22 +25,22 @@ impl TlsConnector {
 }
 
 
-impl From<native_tls_crate::TlsConnector> for TlsConnector {
-    fn from(inner: native_tls_crate::TlsConnector) -> TlsConnector {
+impl From<rustls_connector::RustlsConnector> for TlsConnector {
+    fn from(inner: rustls_connector::RustlsConnector) -> TlsConnector {
         TlsConnector(inner)
     }
 }
 
-pub(crate) struct TlsHandshakeStream<S> {
+pub(crate) struct TlsHandshakeStream<S: Read + Write> {
     inner: Option<InnerHandshake<S>>,
 }
 
-enum InnerHandshake<S> {
+enum InnerHandshake<S: Read + Write> {
     MidHandshake(MidHandshakeTlsStream<S>),
-    Done(native_tls_crate::TlsStream<S>),
+    Done(rustls_connector::TlsStream<S>),
 }
 
-impl<S: Read + Write> InnerHandshake<S> {
+impl<S: Read + Write + Debug + Sync + Send + 'static> InnerHandshake<S> {
     fn get_ref(&self) -> &S {
         match self {
             InnerHandshake::MidHandshake(s) => s.get_ref(),
@@ -46,7 +49,7 @@ impl<S: Read + Write> InnerHandshake<S> {
     }
 }
 
-impl<S: Evented + Read + Write + Send + 'static> HandshakeStream for TlsHandshakeStream<S> {
+impl<S: Evented + Read + Write + Send + Sync + Debug + 'static> HandshakeStream for TlsHandshakeStream<S> {
     type Stream = TlsStream<S>;
 
     fn progress_handshake(&mut self) -> Result<Option<Self::Stream>> {
@@ -66,7 +69,7 @@ impl<S: Evented + Read + Write + Send + 'static> HandshakeStream for TlsHandshak
     }
 }
 
-impl<S: Evented + Read + Write> Evented for TlsHandshakeStream<S> {
+impl<S: Evented + Read + Write + Send + Debug + Sync + 'static> Evented for TlsHandshakeStream<S> {
     #[inline]
     fn register(
         &self,
@@ -103,18 +106,18 @@ impl<S: Evented + Read + Write> Evented for TlsHandshakeStream<S> {
     }
 }
 
-pub(crate) struct TlsStream<S>(native_tls_crate::TlsStream<S>);
+pub(crate) struct TlsStream<S : Read + Write + Send>(rustls_connector::TlsStream<S>);
 
 impl<S: Evented + Read + Write + Send + 'static> IoStream for TlsStream<S> {}
 
-impl<S: Read + Write> Read for TlsStream<S> {
+impl<S: Read + Write + Send> Read for TlsStream<S> {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.0.read(buf)
     }
 }
 
-impl<S: Read + Write> Write for TlsStream<S> {
+impl<S: Read + Write + Send> Write for TlsStream<S> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.0.write(buf)
@@ -126,7 +129,7 @@ impl<S: Read + Write> Write for TlsStream<S> {
     }
 }
 
-impl<S: Evented + Read + Write> Evented for TlsStream<S> {
+impl<S: Evented + Read + Write + Send> Evented for TlsStream<S> {
     #[inline]
     fn register(
         &self,

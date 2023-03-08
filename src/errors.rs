@@ -124,15 +124,26 @@ pub enum Error {
     #[snafu(display("failed to poll: {}", source))]
     FailedToPoll { source: io::Error },
 
-    /// The TLS handshake failed.
-    #[cfg(feature = "native-tls")]
+     /// The TLS handshake failed.
+    #[cfg(feature = "__tls")]
     #[snafu(display("TLS handshake failed: {}", source))]
-    TlsHandshake { source: native_tls::Error },
+    TlsHandshake {
+        #[cfg(feature = "native-tls")]
+        source: native_tls_crate::Error,
+        #[cfg(feature = "rustls-tls")]
+        source: io::Error,
+    },
 
     /// Error from underlying TLS implementation.
-    #[cfg(feature = "native-tls")]
+    #[cfg(feature = "__tls")]
     #[snafu(display("could not create TLS connector: {}", source))]
-    CreateTlsConnector { source: native_tls::Error },
+    CreateTlsConnector {
+        #[cfg(feature = "native-tls")]
+        source: native_tls_crate::Error,
+        #[cfg(feature = "rustls-tls")]
+        source: io::Error,
+    },
+
 
     /// The server does not support the requested auth mechanism.
     #[snafu(display(

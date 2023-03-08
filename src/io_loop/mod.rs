@@ -23,7 +23,7 @@ use std::sync::mpsc::TryRecvError;
 use std::thread::{Builder, JoinHandle};
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "native-tls")]
+#[cfg(feature = "__tls")]
 use crate::stream::HandshakeStream;
 
 mod channel_handle;
@@ -188,7 +188,7 @@ impl IoLoop {
         IoLoop::wait_for_amqp_handshake(ch0_handle, join_handle, handshake_done_rx)
     }
 
-    #[cfg(feature = "native-tls")]
+    #[cfg(feature = "__tls")]
     pub(crate) fn start_tls<Auth: Sasl, S: HandshakeStream>(
         mut self,
         stream: S,
@@ -239,7 +239,7 @@ impl IoLoop {
         }
     }
 
-    #[cfg(feature = "native-tls")]
+    #[cfg(feature = "__tls")]
     fn thread_main_tls<Auth: Sasl, S: HandshakeStream>(
         mut self,
         stream: S,
@@ -253,7 +253,7 @@ impl IoLoop {
         self.thread_main(stream, options, handshake_done_tx, ch0_slot, true)
     }
 
-    #[cfg(feature = "native-tls")]
+    #[cfg(feature = "__tls")]
     fn run_tls_handshake<S: HandshakeStream>(&mut self, mut stream: S) -> Result<S::Stream> {
         let mut state = None;
         self.run_io_loop(
