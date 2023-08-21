@@ -157,7 +157,9 @@ impl ConnectionState {
             }
             // We never expect to see a protocl header (we send it to begin the connection)
             // or a heartbeat on a non-0 channel.
-            AMQPFrame::ProtocolHeader | AMQPFrame::Heartbeat(_) => return FrameUnexpectedSnafu.fail(),
+            AMQPFrame::ProtocolHeader(_) | AMQPFrame::Heartbeat(_) => {
+                return FrameUnexpectedSnafu.fail()
+            }
             // Server-initiated connection close.
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
                 inner.push_method(0, AmqpConnection::CloseOk(ConnectionCloseOk {}));
