@@ -13,7 +13,7 @@ use amq_protocol::protocol::queue::{Declare, Delete};
 ///
 /// ```rust
 /// # use amiquip::{AmqpValue, QueueDeclareOptions, FieldTable};
-/// let mut arguments = FieldTable::new();
+/// let mut arguments = FieldTable::default();
 /// arguments.insert(
 ///     "x-queue-type".into(),
 ///     AmqpValue::LongString("quorum".into()),

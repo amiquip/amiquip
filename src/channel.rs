@@ -290,7 +290,7 @@ impl Channel {
             durable: false,
             exclusive: false,
             auto_delete: false,
-            arguments: FieldTable::new(),
+            arguments: FieldTable::default(),
         };
         let declare = AmqpQueue::Declare(options.into_declare(queue.into(), true, false));
         let ok = self.call::<_, QueueDeclareOk>(declare)?;
@@ -522,7 +522,7 @@ impl Channel {
             durable: false,
             auto_delete: false,
             internal: false,
-            arguments: FieldTable::new(),
+            arguments: FieldTable::default(),
         };
         let declare =
             AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), true, false));

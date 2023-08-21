@@ -151,7 +151,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         }
 
         // bundle up info about this crate as client properties
-        let mut client_properties = FieldTable::new();
+        let mut client_properties = FieldTable::default();
         let mut set_prop = |k: &str, v: String| {
             client_properties.insert(k.into(), AMQPValue::LongString(v.into()));
         };
@@ -168,7 +168,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         if let Some(information) = &self.information {
             set_prop("information", information.to_string());
         }
-        let mut capabilities = FieldTable::new();
+        let mut capabilities = FieldTable::default();
         let mut set_cap = |k: &str| {
             capabilities.insert(k.into(), AMQPValue::Boolean(true));
         };
@@ -284,7 +284,7 @@ mod tests {
         let start = Start {
             version_major: 0,
             version_minor: 9,
-            server_properties: FieldTable::new(),
+            server_properties: FieldTable::default(),
             mechanisms: server_mechanisms.into(),
             locales: options.locale.clone().into(),
         };
@@ -306,7 +306,7 @@ mod tests {
         let start = Start {
             version_major: 0,
             version_minor: 9,
-            server_properties: FieldTable::new(),
+            server_properties: FieldTable::default(),
             mechanisms: options.auth.mechanism().into(),
             locales: server_locales.into(),
         };
