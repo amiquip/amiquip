@@ -30,7 +30,7 @@ use amq_protocol::protocol::queue::Purge as QueuePurge;
 use amq_protocol::protocol::queue::PurgeOk as QueuePurgeOk;
 use amq_protocol::protocol::queue::Unbind as QueueUnbind;
 use amq_protocol::protocol::queue::UnbindOk as QueueUnbindOk;
-use amq_protocol::types::FieldTable;
+use amq_protocol::types::{FieldTable, ShortString};
 use crossbeam_channel::Receiver;
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -166,8 +166,8 @@ impl Channel {
         let mut inner = self.inner.borrow_mut();
         inner.call_nowait(AmqpBasic::Publish(AmqpPublish {
             ticket: 0,
-            exchange: exchange.into(),
-            routing_key: publish.routing_key,
+            exchange: exchange.into().into(), // S -> String -> ShortString
+            routing_key: publish.routing_key.into(),
             mandatory: publish.mandatory,
             immediate: publish.immediate,
         }))?;
@@ -251,7 +251,7 @@ impl Channel {
         let ok = self.call::<_, QueueDeclareOk>(declare)?;
         Ok(Queue::new(
             self,
-            ok.queue,
+            ok.queue.to_string(),
             Some(ok.message_count),
             Some(ok.consumer_count),
         ))
@@ -296,7 +296,7 @@ impl Channel {
         let ok = self.call::<_, QueueDeclareOk>(declare)?;
         Ok(Queue::new(
             self,
-            ok.queue,
+            ok.queue.to_string(),
             Some(ok.message_count),
             Some(ok.consumer_count),
         ))
@@ -315,7 +315,7 @@ impl Channel {
     pub fn basic_get<S: Into<String>>(&self, queue: S, no_ack: bool) -> Result<Option<Get>> {
         self.inner.borrow_mut().get(AmqpGet {
             ticket: 0,
-            queue: queue.into(),
+            queue: queue.into().into(), // S -> String -> ShortString
             no_ack,
         })
     }
@@ -335,8 +335,8 @@ impl Channel {
         //    receives consume-ok.
         let (tag, rx) = self.inner.borrow_mut().consume(Consume {
             ticket: 0,
-            queue: queue.into(),
-            consumer_tag: String::new(),
+            queue: queue.into().into(), // S -> String -> ShortString
+            consumer_tag: ShortString::default(),
             no_local: options.no_local,
             no_ack: options.no_ack,
             exclusive: options.exclusive,
@@ -361,9 +361,9 @@ impl Channel {
     ) -> Result<()> {
         let bind = AmqpQueue::Bind(QueueBind {
             ticket: 0,
-            queue: queue.into(),
-            exchange: exchange.into(),
-            routing_key: routing_key.into(),
+            queue: queue.into().into(),
+            exchange: exchange.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: false,
             arguments,
         });
@@ -385,9 +385,9 @@ impl Channel {
     ) -> Result<()> {
         let bind = AmqpQueue::Bind(QueueBind {
             ticket: 0,
-            queue: queue.into(),
-            exchange: exchange.into(),
-            routing_key: routing_key.into(),
+            queue: queue.into().into(),
+            exchange: exchange.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: true,
             arguments,
         });
@@ -409,9 +409,9 @@ impl Channel {
     ) -> Result<()> {
         let unbind = AmqpQueue::Unbind(QueueUnbind {
             ticket: 0,
-            queue: queue.into(),
-            exchange: exchange.into(),
-            routing_key: routing_key.into(),
+            queue: queue.into().into(),
+            exchange: exchange.into().into(),
+            routing_key: routing_key.into().into(),
             arguments,
         });
         self.call::<_, QueueUnbindOk>(unbind).map(|_| ())
@@ -426,7 +426,7 @@ impl Channel {
     pub fn queue_purge<S: Into<String>>(&self, queue: S) -> Result<u32> {
         let purge = AmqpQueue::Purge(QueuePurge {
             ticket: 0,
-            queue: queue.into(),
+            queue: queue.into().into(), // S -> String -> ShortString
             nowait: false,
         });
         self.call::<_, QueuePurgeOk>(purge)
@@ -441,7 +441,7 @@ impl Channel {
     pub fn queue_purge_nowait<S: Into<String>>(&self, queue: S) -> Result<()> {
         let purge = AmqpQueue::Purge(QueuePurge {
             ticket: 0,
-            queue: queue.into(),
+            queue: queue.into().into(),
             nowait: true,
         });
         self.call_nowait(purge)
@@ -549,9 +549,9 @@ impl Channel {
     ) -> Result<()> {
         let bind = AmqpExchange::Bind(ExchangeBind {
             ticket: 0,
-            destination: destination.into(),
-            source: source.into(),
-            routing_key: routing_key.into(),
+            destination: destination.into().into(),
+            source: source.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: false,
             arguments,
         });
@@ -577,9 +577,9 @@ impl Channel {
     ) -> Result<()> {
         let bind = AmqpExchange::Bind(ExchangeBind {
             ticket: 0,
-            destination: destination.into(),
-            source: source.into(),
-            routing_key: routing_key.into(),
+            destination: destination.into().into(),
+            source: source.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: true,
             arguments,
         });
@@ -605,9 +605,9 @@ impl Channel {
     ) -> Result<()> {
         let unbind = AmqpExchange::Unbind(ExchangeUnbind {
             ticket: 0,
-            destination: destination.into(),
-            source: source.into(),
-            routing_key: routing_key.into(),
+            destination: destination.into().into(),
+            source: source.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: false,
             arguments,
         });
@@ -635,9 +635,9 @@ impl Channel {
     ) -> Result<()> {
         let unbind = AmqpExchange::Unbind(ExchangeUnbind {
             ticket: 0,
-            destination: destination.into(),
-            source: source.into(),
-            routing_key: routing_key.into(),
+            destination: destination.into().into(),
+            source: source.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: true,
             arguments,
         });
@@ -653,7 +653,7 @@ impl Channel {
     pub fn exchange_delete<S: Into<String>>(&self, exchange: S, if_unused: bool) -> Result<()> {
         let delete = AmqpExchange::Delete(ExchangeDelete {
             ticket: 0,
-            exchange: exchange.into(),
+            exchange: exchange.into().into(),
             if_unused,
             nowait: false,
         });
@@ -673,7 +673,7 @@ impl Channel {
     ) -> Result<()> {
         let delete = AmqpExchange::Delete(ExchangeDelete {
             ticket: 0,
-            exchange: exchange.into(),
+            exchange: exchange.into().into(),
             if_unused,
             nowait: true,
         });
@@ -732,7 +732,7 @@ impl Channel {
         // to not supproting nowait consume - we want the cancel-ok to clean
         // up channels in the I/O loop.
         self.call::<_, CancelOk>(AmqpBasic::Cancel(Cancel {
-            consumer_tag: consumer.consumer_tag().to_string(),
+            consumer_tag: consumer.consumer_tag().into(),
             nowait: false,
         }))
         .map(|_ok| ())

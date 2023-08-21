@@ -57,7 +57,7 @@ fn main() -> Result<()> {
 
                 exchange.publish(Publish::with_properties(
                     response.as_bytes(),
-                    reply_to,
+                    reply_to.to_string(),
                     AmqpProperties::default().with_correlation_id(corr_id),
                 ))?;
                 consumer.ack(delivery)?;

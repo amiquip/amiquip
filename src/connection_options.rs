@@ -151,7 +151,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         // bundle up info about this crate as client properties
         let mut client_properties = FieldTable::new();
         let mut set_prop = |k: &str, v: String| {
-            client_properties.insert(k.to_string(), AMQPValue::LongString(v));
+            client_properties.insert(k.into(), AMQPValue::LongString(v));
         };
         set_prop("product", crate::built_info::PKG_NAME.to_string());
         set_prop("version", crate::built_info::PKG_VERSION.to_string());
@@ -168,21 +168,18 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         }
         let mut capabilities = FieldTable::new();
         let mut set_cap = |k: &str| {
-            capabilities.insert(k.to_string(), AMQPValue::Boolean(true));
+            capabilities.insert(k.into(), AMQPValue::Boolean(true));
         };
         set_cap("consumer_cancel_notify");
         set_cap("connection.blocked");
-        client_properties.insert(
-            "capabilities".to_string(),
-            AMQPValue::FieldTable(capabilities),
-        );
+        client_properties.insert("capabilities".into(), AMQPValue::FieldTable(capabilities));
 
         Ok((
             StartOk {
                 client_properties,
-                mechanism,
+                mechanism: mechanism.into(),
                 response: self.auth.response(),
-                locale: self.locale.clone(),
+                locale: self.locale.clone().into(),
             },
             start.server_properties,
         ))
@@ -229,7 +226,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
 
     pub(crate) fn make_open(&self) -> Open {
         Open {
-            virtual_host: self.virtual_host.clone(),
+            virtual_host: self.virtual_host.clone().into(),
             capabilities: "".to_string(), // reserved
             insist: false,                // reserved
         }

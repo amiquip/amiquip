@@ -349,7 +349,7 @@ impl IoLoop {
             HandshakeState::Done(tune_ok, server_properties) => Ok((tune_ok, server_properties)),
             HandshakeState::ServerClosing(close) => ServerClosedConnectionSnafu {
                 code: close.reply_code,
-                message: close.reply_text,
+                message: close.reply_text.to_string(),
             }
             .fail(),
         }
@@ -416,7 +416,7 @@ impl IoLoop {
             ConnectionState::Steady(_) => unreachable!(),
             ConnectionState::ServerClosing(close) => ServerClosedConnectionSnafu {
                 code: close.reply_code,
-                message: close.reply_text,
+                message: close.reply_text.to_string(),
             }
             .fail(),
             ConnectionState::ClientException => ClientExceptionSnafu.fail(),

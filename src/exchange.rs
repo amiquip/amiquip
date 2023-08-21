@@ -68,7 +68,7 @@ impl ExchangeDeclareOptions {
     ) -> Declare {
         Declare {
             ticket: 0,
-            exchange: name,
+            exchange: name.into(),
             passive,
             type_: type_.as_ref().to_string(),
             durable: self.durable,

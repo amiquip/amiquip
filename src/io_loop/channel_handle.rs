@@ -12,6 +12,7 @@ use amq_protocol::protocol::channel::Open as ChannelOpen;
 use amq_protocol::protocol::channel::OpenOk as ChannelOpenOk;
 use amq_protocol::protocol::connection::Close as ConnectionClose;
 use amq_protocol::protocol::constants::REPLY_SUCCESS;
+use amq_protocol::types::ShortString;
 use crossbeam_channel::Sender as CrossbeamSender;
 use log::{debug, trace};
 use std::fmt::Debug;
@@ -50,7 +51,7 @@ impl Channel0Handle {
     pub(crate) fn close_connection(&mut self) -> Result<()> {
         let close = ConnectionClose {
             reply_code: u16::from(REPLY_SUCCESS),
-            reply_text: "goodbye".to_string(),
+            reply_text: "goodbye".into(),
             class_id: 0,
             method_id: 0,
         };
@@ -82,7 +83,7 @@ impl ChannelHandle {
     pub(crate) fn close(&mut self) -> Result<()> {
         let close = AmqpChannel::Close(ChannelClose {
             reply_code: 0,
-            reply_text: String::new(),
+            reply_text: ShortString::default(),
             class_id: 0,
             method_id: 0,
         });
