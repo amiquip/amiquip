@@ -15,8 +15,8 @@ use amq_protocol::protocol::queue::{Declare, Delete};
 /// # use amiquip::{AmqpValue, QueueDeclareOptions, FieldTable};
 /// let mut arguments = FieldTable::new();
 /// arguments.insert(
-///     "x-queue-type".to_string(),
-///     AmqpValue::LongString("quorum".to_string()),
+///     "x-queue-type".into(),
+///     AmqpValue::LongString("quorum".into()),
 /// );
 /// let options = QueueDeclareOptions {
 ///     arguments,

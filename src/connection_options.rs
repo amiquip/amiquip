@@ -133,16 +133,18 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
 
         // ensure our requested auth mechanism and locale are available
         let mechanism = self.auth.mechanism();
-        if !server_supports(&start.mechanisms, &mechanism) {
+        let available = start.mechanisms.to_string();
+        if !server_supports(&available, &mechanism) {
             return UnsupportedAuthMechanismSnafu {
-                available: start.mechanisms,
+                available,
                 requested: mechanism,
             }
             .fail();
         }
-        if !server_supports(&start.locales, &self.locale) {
+        let locales = start.locales.to_string();
+        if !server_supports(&locales, &self.locale) {
             return UnsupportedLocaleSnafu {
-                available: start.locales,
+                available: locales,
                 requested: self.locale.clone(),
             }
             .fail();
@@ -151,7 +153,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         // bundle up info about this crate as client properties
         let mut client_properties = FieldTable::new();
         let mut set_prop = |k: &str, v: String| {
-            client_properties.insert(k.into(), AMQPValue::LongString(v));
+            client_properties.insert(k.into(), AMQPValue::LongString(v.into()));
         };
         set_prop("product", crate::built_info::PKG_NAME.to_string());
         set_prop("version", crate::built_info::PKG_VERSION.to_string());
@@ -178,7 +180,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
             StartOk {
                 client_properties,
                 mechanism: mechanism.into(),
-                response: self.auth.response(),
+                response: self.auth.response().into(),
                 locale: self.locale.clone().into(),
             },
             start.server_properties,
@@ -283,8 +285,8 @@ mod tests {
             version_major: 0,
             version_minor: 9,
             server_properties: FieldTable::new(),
-            mechanisms: server_mechanisms.to_string(),
-            locales: options.locale.clone(),
+            mechanisms: server_mechanisms.into(),
+            locales: options.locale.clone().into(),
         };
 
         let res = options.make_start_ok(start);
@@ -305,8 +307,8 @@ mod tests {
             version_major: 0,
             version_minor: 9,
             server_properties: FieldTable::new(),
-            mechanisms: options.auth.mechanism(),
-            locales: server_locales.to_string(),
+            mechanisms: options.auth.mechanism().into(),
+            locales: server_locales.into(),
         };
 
         let res = options.make_start_ok(start);
