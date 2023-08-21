@@ -1,6 +1,6 @@
 [package]
 name = "amiquip"
-version = "0.4.2"
+version = "0.5.0"
 authors = ["John Gallagher <johnkgallagher@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -21,11 +21,11 @@ default = ["native-tls"]
 snafu = { version = "0.7", default-features = false, features = ["std"]}
 input_buffer = "0.5"
 bytes = "1.1"
-amq-protocol = "1.4"
+amq-protocol = "7.1"
 log = "0.4"
 mio = "0.6"
 mio-extras = "2.0"
-cookie-factory = "0.2"
+cookie-factory = "0.3"
 crossbeam-channel = "0.5"
 indexmap = "1.6"
 url = "2.2.2"

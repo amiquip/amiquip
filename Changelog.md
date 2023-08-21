@@ -1,3 +1,9 @@
+# Version 0.5.0 (2023-08-21)
+
+* Updated dependencies to address future incompatiblity lints.
+  * amq-protocol (now 7.1)
+  * cookie-factory (now 0.3)
+
 # Version 0.4.2 (2022-01-12)
 
 * Fix compilation error with default features disabled (#36)
