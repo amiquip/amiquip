@@ -165,7 +165,6 @@ impl Channel {
     pub fn basic_publish<S: Into<String>>(&self, exchange: S, publish: Publish) -> Result<()> {
         let mut inner = self.inner.borrow_mut();
         inner.call_nowait(AmqpBasic::Publish(AmqpPublish {
-            ticket: 0,
             exchange: exchange.into().into(), // S -> String -> ShortString
             routing_key: publish.routing_key.into(),
             mandatory: publish.mandatory,
@@ -314,7 +313,6 @@ impl Channel {
     /// to you on demand instead of polling with `get`.
     pub fn basic_get<S: Into<String>>(&self, queue: S, no_ack: bool) -> Result<Option<Get>> {
         self.inner.borrow_mut().get(AmqpGet {
-            ticket: 0,
             queue: queue.into().into(), // S -> String -> ShortString
             no_ack,
         })
@@ -334,7 +332,6 @@ impl Channel {
         // 2. The I/O loop allocates the channel to send deliveries when it
         //    receives consume-ok.
         let (tag, rx) = self.inner.borrow_mut().consume(Consume {
-            ticket: 0,
             queue: queue.into().into(), // S -> String -> ShortString
             consumer_tag: ShortString::default(),
             no_local: options.no_local,
@@ -360,7 +357,6 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpQueue::Bind(QueueBind {
-            ticket: 0,
             queue: queue.into().into(),
             exchange: exchange.into().into(),
             routing_key: routing_key.into().into(),
@@ -384,7 +380,6 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpQueue::Bind(QueueBind {
-            ticket: 0,
             queue: queue.into().into(),
             exchange: exchange.into().into(),
             routing_key: routing_key.into().into(),
@@ -408,7 +403,6 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let unbind = AmqpQueue::Unbind(QueueUnbind {
-            ticket: 0,
             queue: queue.into().into(),
             exchange: exchange.into().into(),
             routing_key: routing_key.into().into(),
@@ -425,7 +419,6 @@ impl Channel {
     /// [`Queue::purge`](struct.Queue.html#method.purge) to avoid this.
     pub fn queue_purge<S: Into<String>>(&self, queue: S) -> Result<u32> {
         let purge = AmqpQueue::Purge(QueuePurge {
-            ticket: 0,
             queue: queue.into().into(), // S -> String -> ShortString
             nowait: false,
         });
@@ -440,7 +433,6 @@ impl Channel {
     /// [`Queue::purge_nowait`](struct.Queue.html#method.purge_nowait) to avoid this.
     pub fn queue_purge_nowait<S: Into<String>>(&self, queue: S) -> Result<()> {
         let purge = AmqpQueue::Purge(QueuePurge {
-            ticket: 0,
             queue: queue.into().into(),
             nowait: true,
         });
@@ -548,7 +540,6 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpExchange::Bind(ExchangeBind {
-            ticket: 0,
             destination: destination.into().into(),
             source: source.into().into(),
             routing_key: routing_key.into().into(),
@@ -576,7 +567,6 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpExchange::Bind(ExchangeBind {
-            ticket: 0,
             destination: destination.into().into(),
             source: source.into().into(),
             routing_key: routing_key.into().into(),
@@ -604,7 +594,6 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let unbind = AmqpExchange::Unbind(ExchangeUnbind {
-            ticket: 0,
             destination: destination.into().into(),
             source: source.into().into(),
             routing_key: routing_key.into().into(),
@@ -634,7 +623,6 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let unbind = AmqpExchange::Unbind(ExchangeUnbind {
-            ticket: 0,
             destination: destination.into().into(),
             source: source.into().into(),
             routing_key: routing_key.into().into(),
@@ -652,7 +640,6 @@ impl Channel {
     /// `if_unused` was true and it has queue bindings), it will close this channel.
     pub fn exchange_delete<S: Into<String>>(&self, exchange: S, if_unused: bool) -> Result<()> {
         let delete = AmqpExchange::Delete(ExchangeDelete {
-            ticket: 0,
             exchange: exchange.into().into(),
             if_unused,
             nowait: false,
@@ -672,7 +659,6 @@ impl Channel {
         if_unused: bool,
     ) -> Result<()> {
         let delete = AmqpExchange::Delete(ExchangeDelete {
-            ticket: 0,
             exchange: exchange.into().into(),
             if_unused,
             nowait: true,

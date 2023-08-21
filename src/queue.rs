@@ -48,7 +48,6 @@ pub struct QueueDeclareOptions {
 impl QueueDeclareOptions {
     pub(crate) fn into_declare(self, queue: String, passive: bool, nowait: bool) -> Declare {
         Declare {
-            ticket: 0,
             queue: queue.into(),
             passive,
             durable: self.durable,
@@ -76,7 +75,6 @@ pub struct QueueDeleteOptions {
 impl QueueDeleteOptions {
     pub(crate) fn into_delete(self, queue: String, nowait: bool) -> Delete {
         Delete {
-            ticket: 0,
             queue: queue.into(),
             if_unused: self.if_unused,
             if_empty: self.if_empty,

@@ -67,7 +67,6 @@ impl ExchangeDeclareOptions {
         nowait: bool,
     ) -> Declare {
         Declare {
-            ticket: 0,
             exchange: name.into(),
             passive,
             type_: type_.as_ref().to_string(),
