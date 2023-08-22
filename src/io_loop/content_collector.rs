@@ -235,20 +235,14 @@ impl<T: ContentType> State<T> {
                 let body_size = header.body_size as usize;
                 buf.append(&mut body);
                 match buf.len().cmp(&body_size) {
-                    Ordering::Equal => {
-                        Ok(Content::Done(T::new(
-                            channel_id,
-                            start,
-                            buf,
-                            header.properties,
-                        )))
-                    },
-                    Ordering::Less => {
-                        Ok(Content::NeedMore(State::Body(start, header, buf)))
-                    }
-                    _ => {
-                        FrameUnexpectedSnafu.fail()
-                    }
+                    Ordering::Equal => Ok(Content::Done(T::new(
+                        channel_id,
+                        start,
+                        buf,
+                        header.properties,
+                    ))),
+                    Ordering::Less => Ok(Content::NeedMore(State::Body(start, header, buf))),
+                    _ => FrameUnexpectedSnafu.fail(),
                 }
             }
             State::Start(_) => FrameUnexpectedSnafu.fail(),

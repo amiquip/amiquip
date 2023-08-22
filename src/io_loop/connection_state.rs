@@ -397,13 +397,12 @@ impl ConnectionState {
                 if let Some(collected) = slot.collector.collect_header(*header)? {
                     match collected {
                         CollectorResult::Delivery((consumer_tag, delivery)) => {
-                            let tx =
-                                slot.consumers
-                                    .get(&consumer_tag)
-                                    .context(UnknownConsumerTagSnafu {
-                                        channel_id: n,
-                                        consumer_tag,
-                                    })?;
+                            let tx = slot.consumers.get(&consumer_tag).context(
+                                UnknownConsumerTagSnafu {
+                                    channel_id: n,
+                                    consumer_tag,
+                                },
+                            )?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {
@@ -421,13 +420,12 @@ impl ConnectionState {
                 if let Some(collected) = slot.collector.collect_body(body)? {
                     match collected {
                         CollectorResult::Delivery((consumer_tag, delivery)) => {
-                            let tx =
-                                slot.consumers
-                                    .get(&consumer_tag)
-                                    .context(UnknownConsumerTagSnafu {
-                                        channel_id: n,
-                                        consumer_tag,
-                                    })?;
+                            let tx = slot.consumers.get(&consumer_tag).context(
+                                UnknownConsumerTagSnafu {
+                                    channel_id: n,
+                                    consumer_tag,
+                                },
+                            )?;
                             send(tx, ConsumerMessage::Delivery(delivery))?;
                         }
                         CollectorResult::Return(return_) => {
