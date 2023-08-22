@@ -62,8 +62,7 @@ impl Channel0Handle {
         let mut handle = self.handle.allocate_channel(channel_id)?;
 
         debug!("opening channel {}", handle.channel_id());
-        let out_of_band = String::new();
-        let open = AmqpChannel::Open(ChannelOpen { out_of_band });
+        let open = AmqpChannel::Open(ChannelOpen {});
 
         let open_ok = handle.call::<_, ChannelOpenOk>(open)?;
         trace!("got open-ok: {:?}", open_ok);
