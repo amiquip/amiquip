@@ -5,6 +5,7 @@
   * cookie-factory (now 0.3)
 * Deprecated `Channel::qos()` in favor of `Channel::set_qos()`
 * `Error::__Nonexhaustive` replaced with `non_exhaustive` attribute
+* Switch to 2021 Edition
 
 # Version 0.4.2 (2022-01-12)
 

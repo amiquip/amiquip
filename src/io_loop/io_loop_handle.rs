@@ -107,7 +107,7 @@ impl IoLoopHandle {
     fn call_message<T: TryFromAmqpClass>(&mut self, message: IoLoopMessage) -> Result<T> {
         self.send(message)?;
         match self.recv()? {
-            ChannelMessage::Method(method) => T::try_from(method),
+            ChannelMessage::Method(method) => T::try_from_class(method),
             ChannelMessage::ConsumeOk(_, _) | ChannelMessage::GetOk(_) => {
                 FrameUnexpectedSnafu.fail()
             }
