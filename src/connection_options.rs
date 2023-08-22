@@ -229,8 +229,6 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
     pub(crate) fn make_open(&self) -> Open {
         Open {
             virtual_host: self.virtual_host.clone().into(),
-            capabilities: "".to_string(), // reserved
-            insist: false,                // reserved
         }
     }
 }
