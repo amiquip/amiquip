@@ -721,7 +721,7 @@ impl Inner {
                         // enqueuing up a heartbeat frame
                         if self.outbuf.is_empty() {
                             debug!("sending heartbeat");
-                            self.outbuf.push_heartbeat();
+                            self.outbuf.push_heartbeat(0);
                         } else {
                             warn!("tx heartbeat fired, but already have queued data to write - possible socket problem");
                         }
