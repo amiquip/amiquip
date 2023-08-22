@@ -291,12 +291,12 @@ mod tests {
     fn callback_fail() {
         let mut c = Cursor::new(b"a\x04aa").chain(would_block());
 
-        // use __Nonexhaustive as "some non-parsing, non-I/O error"
+        // use MaformedFrame as placeholder for "some non-parsing, non-I/O error"
         let mut buf = make_buffer();
-        let res = buf.read_from(&mut c, |_| __NonexhaustiveSnafu.fail());
+        let res = buf.read_from(&mut c, |_| MalformedFrameSnafu.fail());
         assert!(res.is_err());
         match res.unwrap_err() {
-            Error::__Nonexhaustive => (),
+            Error::MalformedFrame => (),
             err => panic!("unexpected error {}", err),
         }
     }

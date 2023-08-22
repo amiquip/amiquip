@@ -274,7 +274,7 @@ impl Channel {
     ) -> Result<Queue> {
         let queue = queue.into();
         assert!(
-            queue != "",
+            !queue.is_empty(),
             "cannot asynchronously declare auto-named queues"
         );
         let declare = AmqpQueue::Declare(options.into_declare(queue.clone(), false, true));

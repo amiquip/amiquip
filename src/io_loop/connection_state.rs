@@ -40,7 +40,7 @@ fn slot_remove(inner: &mut Inner, channel_id: u16) -> Result<ChannelSlot> {
         .context(ReceivedFrameWithBogusChannelIdSnafu { channel_id })
 }
 
-fn slot_get(inner: &mut Inner, channel_id: u16) -> Result<&ChannelSlot> {
+fn slot_get(inner: &Inner, channel_id: u16) -> Result<&ChannelSlot> {
     inner
         .chan_slots
         .get(channel_id)

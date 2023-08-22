@@ -164,7 +164,7 @@ impl Consumer<'_> {
             return Ok(());
         }
         self.cancelled.set(true);
-        self.channel.basic_cancel(&self)
+        self.channel.basic_cancel(self)
     }
 
     /// Calls [`Delivery::ack`](struct.Delivery.html#method.ack) on `delivery` using the channel
