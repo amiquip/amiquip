@@ -3,6 +3,7 @@
 * Updated dependencies to address future incompatiblity lints.
   * amq-protocol (now 7.1)
   * cookie-factory (now 0.3)
+* Deprecated `Channel::qos()` in favor of `Channel::set_qos()`
 
 # Version 0.4.2 (2022-01-12)
 

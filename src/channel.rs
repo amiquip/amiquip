@@ -127,24 +127,28 @@ impl Channel {
 
     /// Specify the prefetching window.
     ///
-    /// If `prefetch_size` is greater than 0, instructs the server to go ahead and send messages up
-    /// to `prefetch_size` in bytes even before previous deliveries have been acknowledged. If
-    /// `prefetch_count` is greater than 0, instructs the server to go ahead and send up to
-    /// `prefetch_count` messages even before previous deliveries have been acknowledged. If either
-    /// field is 0, that field is ignored. If both are 0, prefetching is disabled. If both are
-    /// nonzero, messages will only be sent before previous deliveries are acknowledged if that
-    /// send would satisfy both prefetch limits. If a consumer is started with `no_ack` set to
-    /// true, prefetch limits are ignored and messages are sent as quickly as possible.
+    /// `prefetch_size` is no longer supported and will be ignored. Use `set_qos` instead.
+    #[deprecated(since = "0.5.0", note = "amq-protocol no longer exposes prefetch_size")]
+    pub fn qos(&self, prefetch_size: u32, prefetch_count: u16, global: bool) -> Result<()> {
+        let _ = prefetch_size;
+        self.set_qos(prefetch_count, global)
+    }
+
+    /// Specify the prefetching window.
     ///
-    /// According to the AMQP spec, setting `global` to true means to apply these prefetch settings
+    /// If `prefetch_count` is greater than 0, instructs the server to go ahead and send up to
+    /// `prefetch_count` messages even before previous deliveries have been acknowledged. If zero,
+    /// the field is ignored, and prefetching is disabled. If a consumer is started with `no_ack`
+    /// set to `true`, prefetch limits are ignored and messages are sent as quickly as possible.
+    ///
+    /// According to the AMQP spec, setting `global` to `true` means to apply these prefetch settings
     /// to all channels in the entire connection, and `global` false means the settings apply only
     /// to this channel. RabbitMQ does not interpret `global` the same way; for it, `global: true`
     /// means the settings apply to all consumers on this channel, and `global: false` means the
-    /// settings apply only to consumers created on this channel after this call to `qos`, not
+    /// settings apply only to consumers created on this channel after this call to `set_qos`, not
     /// affecting previously-created consumers.
-    pub fn qos(&self, prefetch_size: u32, prefetch_count: u16, global: bool) -> Result<()> {
+    pub fn set_qos(&self, prefetch_count: u16, global: bool) -> Result<()> {
         self.call::<_, QosOk>(AmqpBasic::Qos(Qos {
-            prefetch_size,
             prefetch_count,
             global,
         }))
