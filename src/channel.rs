@@ -164,17 +164,15 @@ impl Channel {
     /// and then [`Exchange::publish`](struct.Exchange.html#method.publish) to avoid this.
     pub fn basic_publish<S: Into<String>>(&self, exchange: S, publish: Publish) -> Result<()> {
         let mut inner = self.inner.borrow_mut();
-        inner.call_nowait(AmqpBasic::Publish(AmqpPublish {
+        let amqp_publish = AmqpPublish {
             exchange: exchange.into().into(), // S -> String -> ShortString
             routing_key: publish.routing_key.into(),
             mandatory: publish.mandatory,
             immediate: publish.immediate,
-        }))?;
-        inner.send_content(
-            publish.body,
-            AmqpPublish::get_class_id(),
-            &publish.properties,
-        )
+        };
+        let class_id = amqp_publish.get_amqp_class_id();
+        inner.call_nowait(AmqpBasic::Publish(amqp_publish))?;
+        inner.send_content(publish.body, class_id, &publish.properties)
     }
 
     /// Open a crossbeam channel to receive publisher confirmations from the server.
