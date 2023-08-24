@@ -34,6 +34,7 @@ pub struct ConnectionOptions<Auth: Sasl> {
     pub(crate) heartbeat: u16,
     pub(crate) connection_timeout: Option<Duration>,
     information: Option<String>,
+    connection_name: Option<String>,
 }
 
 impl<Auth: Sasl> Default for ConnectionOptions<Auth> {
@@ -48,6 +49,7 @@ impl<Auth: Sasl> Default for ConnectionOptions<Auth> {
             heartbeat: 60,
             connection_timeout: None,
             information: None,
+            connection_name: None,
         }
     }
 }
@@ -125,6 +127,15 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         }
     }
 
+    /// Sets the "client-provided connection name" string reported during handshaking to the server.
+    /// This string is displayed in the RabbitMQ management interface and in log entries.
+    pub fn connection_name(self, connection_name: Option<String>) -> Self {
+        ConnectionOptions {
+            connection_name,
+            ..self
+        }
+    }
+
     pub(crate) fn make_start_ok(&self, start: Start) -> Result<(StartOk, FieldTable)> {
         // helper to search space-separated strings (mechanisms and locales)
         fn server_supports(server: &str, client: &str) -> bool {
@@ -165,6 +176,9 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         );
         if let Some(information) = &self.information {
             set_prop("information", information.to_string());
+        }
+        if let Some(name) = &self.connection_name {
+            set_prop("connection_name", name.to_string());
         }
         let mut capabilities = FieldTable::new();
         let mut set_cap = |k: &str| {
