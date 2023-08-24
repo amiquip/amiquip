@@ -601,6 +601,9 @@ mod amqp_url {
                         .fail();
                     }
                 }
+                "connection_name" => {
+                    options = options.connection_name(Some(v.to_string()));
+                }
                 parameter => {
                     return UrlUnsupportedParameterSnafu {
                         url: url.clone(),
