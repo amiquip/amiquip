@@ -384,3 +384,63 @@ fn serialize<F: Fn(&mut [u8], usize) -> StdResult<(&mut [u8], usize), GenError>>
         buf.resize(resize_to, 0);
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use amq_protocol::protocol::basic::{AMQPMethod, CancelOk, Publish};
+
+    #[test]
+    fn test_heartbeat() {
+        let mut buf = OutputBuffer::empty();
+        buf.push_heartbeat();
+        let expected = [8, 0, 0, 0, 0, 0, 0, 206];
+        assert_eq!(buf.0, &expected);
+    }
+
+    #[test]
+    fn test_method() {
+        let mut buf = OutputBuffer::empty();
+        let method = AMQPMethod::CancelOk(CancelOk {
+            consumer_tag: "tag".into(),
+        });
+        buf.push_method(3, method);
+        let expected = [1, 0, 3, 0, 0, 0, 8, 0, 60, 0, 31, 3, 116, 97, 103, 206];
+        assert_eq!(buf.0, &expected);
+    }
+
+    #[test]
+    fn test_content_header() {
+        let mut buf = OutputBuffer::empty();
+        let properties = AMQPProperties::default();
+        buf.push_content_header(3, Publish::get_class_id(), 0, &properties);
+        let expected = [
+            2, 0, 3, 0, 0, 0, 14, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 206,
+        ];
+        assert_eq!(buf.0, &expected);
+    }
+
+    #[test]
+    fn test_content_body() {
+        let mut buf = OutputBuffer::empty();
+        buf.push_content_body(3, "test body".as_bytes());
+        let expected = [
+            3, 0, 3, 0, 0, 0, 9, 116, 101, 115, 116, 32, 98, 111, 100, 121, 206,
+        ];
+        assert_eq!(buf.0, &expected);
+    }
+
+    #[test]
+    fn test_multi() {
+        let mut buf = OutputBuffer::empty();
+        let properties = AMQPProperties::default();
+        let body = "test body";
+        buf.push_content_header(3, Publish::get_class_id(), body.len(), &properties);
+        buf.push_content_body(3, body.as_bytes());
+        let expected = [
+            2, 0, 3, 0, 0, 0, 14, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 206, 3, 0, 3, 0, 0, 0,
+            9, 116, 101, 115, 116, 32, 98, 111, 100, 121, 206,
+        ];
+        assert_eq!(buf.0, &expected);
+    }
+}
