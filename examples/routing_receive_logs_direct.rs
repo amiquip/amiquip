@@ -43,7 +43,7 @@ fn main() -> Result<()> {
 
     for severity in args.skip(1) {
         // Bind to each requested log severity.
-        queue.bind(&exchange, severity, FieldTable::new())?;
+        queue.bind(&exchange, severity, FieldTable::default())?;
     }
 
     // Start a consumer. Use no_ack: true so the server doesn't wait for us to ack

@@ -32,7 +32,7 @@ fn main() -> Result<()> {
     println!("created exclusive queue {}", queue.name());
 
     // Bind our queue to the logs exchange.
-    queue.bind(&exchange, "", FieldTable::new())?;
+    queue.bind(&exchange, "", FieldTable::default())?;
 
     // Start a consumer. Use no_ack: true so the server doesn't wait for us to ack
     // the messages it sends us.

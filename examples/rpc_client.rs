@@ -4,6 +4,7 @@ use amiquip::{
     AmqpProperties, Channel, Connection, Consumer, ConsumerMessage, ConsumerOptions, Exchange,
     Publish, Queue, QueueDeclareOptions, Result,
 };
+use amq_protocol::types::ShortString;
 use uuid::Uuid;
 
 struct FibonacciRpcClient<'a> {
@@ -36,12 +37,12 @@ impl<'a> FibonacciRpcClient<'a> {
     }
 
     fn call(&self, n: u64) -> Result<String> {
-        let correlation_id = format!("{}", Uuid::new_v4());
+        let correlation_id: ShortString = format!("{}", Uuid::new_v4()).into();
         self.exchange.publish(Publish::with_properties(
             format!("{}", n).as_bytes(),
             "rpc_queue",
             AmqpProperties::default()
-                .with_reply_to(self.queue.name().to_string())
+                .with_reply_to(self.queue.name().into())
                 .with_correlation_id(correlation_id.clone()),
         ))?;
         for message in self.consumer.receiver().iter() {

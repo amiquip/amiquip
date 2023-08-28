@@ -26,7 +26,7 @@ fn main() -> Result<()> {
     )?;
 
     // Set QOS to only send us 1 message at a time.
-    channel.qos(0, 1, false)?;
+    channel.set_qos(1, false)?;
 
     // Start a consumer.
     let consumer = queue.consume(ConsumerOptions::default())?;

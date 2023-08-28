@@ -15,8 +15,8 @@ use std::cell::Cell;
 ///
 /// ```rust
 /// # use amiquip::{AmqpValue, ConsumerOptions, FieldTable};
-/// let mut arguments = FieldTable::new();
-/// arguments.insert("x-priority".to_string(), AmqpValue::ShortInt(10));
+/// let mut arguments = FieldTable::default();
+/// arguments.insert("x-priority".into(), AmqpValue::ShortInt(10));
 /// let options = ConsumerOptions {
 ///     arguments,
 ///     ..ConsumerOptions::default()

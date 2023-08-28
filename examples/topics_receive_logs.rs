@@ -42,7 +42,7 @@ fn main() -> Result<()> {
     }
 
     for binding_key in args.skip(1) {
-        queue.bind(&exchange, binding_key, FieldTable::new())?;
+        queue.bind(&exchange, binding_key, FieldTable::default())?;
     }
 
     // Start a consumer. Use no_ack: true so the server doesn't wait for us to ack

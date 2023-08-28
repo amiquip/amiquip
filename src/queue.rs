@@ -13,10 +13,10 @@ use amq_protocol::protocol::queue::{Declare, Delete};
 ///
 /// ```rust
 /// # use amiquip::{AmqpValue, QueueDeclareOptions, FieldTable};
-/// let mut arguments = FieldTable::new();
+/// let mut arguments = FieldTable::default();
 /// arguments.insert(
-///     "x-queue-type".to_string(),
-///     AmqpValue::LongString("quorum".to_string()),
+///     "x-queue-type".into(),
+///     AmqpValue::LongString("quorum".into()),
 /// );
 /// let options = QueueDeclareOptions {
 ///     arguments,
@@ -48,8 +48,7 @@ pub struct QueueDeclareOptions {
 impl QueueDeclareOptions {
     pub(crate) fn into_declare(self, queue: String, passive: bool, nowait: bool) -> Declare {
         Declare {
-            ticket: 0,
-            queue,
+            queue: queue.into(),
             passive,
             durable: self.durable,
             exclusive: self.exclusive,
@@ -76,8 +75,7 @@ pub struct QueueDeleteOptions {
 impl QueueDeleteOptions {
     pub(crate) fn into_delete(self, queue: String, nowait: bool) -> Delete {
         Delete {
-            ticket: 0,
-            queue,
+            queue: queue.into(),
             if_unused: self.if_unused,
             if_empty: self.if_empty,
             nowait,

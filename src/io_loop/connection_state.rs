@@ -128,7 +128,7 @@ impl ConnectionState {
         error!("{} - closing connection", reply_text);
         let close = ConnectionClose {
             reply_code: reply_code.get_id(),
-            reply_text,
+            reply_text: reply_text.into(),
             class_id: 0,
             method_id: 0,
         };
@@ -157,13 +157,15 @@ impl ConnectionState {
             }
             // We never expect to see a protocl header (we send it to begin the connection)
             // or a heartbeat on a non-0 channel.
-            AMQPFrame::ProtocolHeader | AMQPFrame::Heartbeat(_) => return FrameUnexpectedSnafu.fail(),
+            AMQPFrame::ProtocolHeader(_) | AMQPFrame::Heartbeat(_) => {
+                return FrameUnexpectedSnafu.fail()
+            }
             // Server-initiated connection close.
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Close(close))) => {
                 inner.push_method(0, AmqpConnection::CloseOk(ConnectionCloseOk {}));
                 inner.seal_writes();
                 let reply_code = close.reply_code;
-                let message = close.reply_text.clone();
+                let message = close.reply_text.to_string();
                 let make_err = || Error::ServerClosedConnection {
                     code: reply_code,
                     message: message.clone(),
@@ -198,7 +200,7 @@ impl ConnectionState {
             // Server is blocking publishes due to an alarm on its side (e.g., low mem)
             AMQPFrame::Method(0, AMQPClass::Connection(AmqpConnection::Blocked(blocked))) => {
                 warn!("server has blocked connection; reason = {}", blocked.reason);
-                let note = ConnectionBlockedNotification::Blocked(blocked.reason);
+                let note = ConnectionBlockedNotification::Blocked(blocked.reason.to_string());
                 try_send_blocked(ch0_slot, note);
             }
             // Server has unblocked publishes
@@ -224,7 +226,7 @@ impl ConnectionState {
                 let make_err = || Error::ServerClosedChannel {
                     channel_id: n,
                     code: close.reply_code,
-                    message: close.reply_text.clone(),
+                    message: close.reply_text.to_string(),
                 };
                 send(&slot.tx, Err(make_err()))?;
                 for (_, tx) in slot.consumers.drain() {
@@ -253,7 +255,7 @@ impl ConnectionState {
             }
             // Server ack for consume request.
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::ConsumeOk(consume_ok))) => {
-                let consumer_tag = consume_ok.consumer_tag;
+                let consumer_tag = consume_ok.consumer_tag.to_string();
                 let slot = slot_get_mut(inner, n)?;
                 match slot.consumers.entry(consumer_tag.clone()) {
                     Entry::Occupied(_) => {
@@ -274,7 +276,7 @@ impl ConnectionState {
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::Cancel(cancel))) => {
                 let consumer_tag = cancel.consumer_tag;
                 let slot = slot_get_mut(inner, n)?;
-                if let Some(tx) = slot.consumers.remove(&consumer_tag) {
+                if let Some(tx) = slot.consumers.remove(consumer_tag.as_str()) {
                     send(&tx, ConsumerMessage::ServerCancelled)?;
                 }
                 if !cancel.nowait {
@@ -284,7 +286,7 @@ impl ConnectionState {
             // Server ack for client-initiated consumer cancel.
             AMQPFrame::Method(n, AMQPClass::Basic(AmqpBasic::CancelOk(cancel_ok))) => {
                 let slot = slot_get_mut(inner, n)?;
-                let consumer = slot.consumers.remove(&cancel_ok.consumer_tag);
+                let consumer = slot.consumers.remove(cancel_ok.consumer_tag.as_str());
                 send(
                     &slot.tx,
                     Ok(ChannelMessage::Method(AMQPClass::Basic(

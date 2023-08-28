@@ -30,7 +30,7 @@ use amq_protocol::protocol::queue::Purge as QueuePurge;
 use amq_protocol::protocol::queue::PurgeOk as QueuePurgeOk;
 use amq_protocol::protocol::queue::Unbind as QueueUnbind;
 use amq_protocol::protocol::queue::UnbindOk as QueueUnbindOk;
-use amq_protocol::types::FieldTable;
+use amq_protocol::types::{FieldTable, ShortString};
 use crossbeam_channel::Receiver;
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -127,24 +127,28 @@ impl Channel {
 
     /// Specify the prefetching window.
     ///
-    /// If `prefetch_size` is greater than 0, instructs the server to go ahead and send messages up
-    /// to `prefetch_size` in bytes even before previous deliveries have been acknowledged. If
-    /// `prefetch_count` is greater than 0, instructs the server to go ahead and send up to
-    /// `prefetch_count` messages even before previous deliveries have been acknowledged. If either
-    /// field is 0, that field is ignored. If both are 0, prefetching is disabled. If both are
-    /// nonzero, messages will only be sent before previous deliveries are acknowledged if that
-    /// send would satisfy both prefetch limits. If a consumer is started with `no_ack` set to
-    /// true, prefetch limits are ignored and messages are sent as quickly as possible.
+    /// `prefetch_size` is no longer supported and will be ignored. Use `set_qos` instead.
+    #[deprecated(since = "0.5.0", note = "amq-protocol no longer exposes prefetch_size")]
+    pub fn qos(&self, prefetch_size: u32, prefetch_count: u16, global: bool) -> Result<()> {
+        let _ = prefetch_size;
+        self.set_qos(prefetch_count, global)
+    }
+
+    /// Specify the prefetching window.
     ///
-    /// According to the AMQP spec, setting `global` to true means to apply these prefetch settings
+    /// If `prefetch_count` is greater than 0, instructs the server to go ahead and send up to
+    /// `prefetch_count` messages even before previous deliveries have been acknowledged. If zero,
+    /// the field is ignored, and prefetching is disabled. If a consumer is started with `no_ack`
+    /// set to `true`, prefetch limits are ignored and messages are sent as quickly as possible.
+    ///
+    /// According to the AMQP spec, setting `global` to `true` means to apply these prefetch settings
     /// to all channels in the entire connection, and `global` false means the settings apply only
     /// to this channel. RabbitMQ does not interpret `global` the same way; for it, `global: true`
     /// means the settings apply to all consumers on this channel, and `global: false` means the
-    /// settings apply only to consumers created on this channel after this call to `qos`, not
+    /// settings apply only to consumers created on this channel after this call to `set_qos`, not
     /// affecting previously-created consumers.
-    pub fn qos(&self, prefetch_size: u32, prefetch_count: u16, global: bool) -> Result<()> {
+    pub fn set_qos(&self, prefetch_count: u16, global: bool) -> Result<()> {
         self.call::<_, QosOk>(AmqpBasic::Qos(Qos {
-            prefetch_size,
             prefetch_count,
             global,
         }))
@@ -164,18 +168,15 @@ impl Channel {
     /// and then [`Exchange::publish`](struct.Exchange.html#method.publish) to avoid this.
     pub fn basic_publish<S: Into<String>>(&self, exchange: S, publish: Publish) -> Result<()> {
         let mut inner = self.inner.borrow_mut();
-        inner.call_nowait(AmqpBasic::Publish(AmqpPublish {
-            ticket: 0,
-            exchange: exchange.into(),
-            routing_key: publish.routing_key,
+        let amqp_publish = AmqpPublish {
+            exchange: exchange.into().into(), // S -> String -> ShortString
+            routing_key: publish.routing_key.into(),
             mandatory: publish.mandatory,
             immediate: publish.immediate,
-        }))?;
-        inner.send_content(
-            publish.body,
-            AmqpPublish::get_class_id(),
-            &publish.properties,
-        )
+        };
+        let class_id = amqp_publish.get_amqp_class_id();
+        inner.call_nowait(AmqpBasic::Publish(amqp_publish))?;
+        inner.send_content(publish.body, class_id, &publish.properties)
     }
 
     /// Open a crossbeam channel to receive publisher confirmations from the server.
@@ -251,7 +252,7 @@ impl Channel {
         let ok = self.call::<_, QueueDeclareOk>(declare)?;
         Ok(Queue::new(
             self,
-            ok.queue,
+            ok.queue.to_string(),
             Some(ok.message_count),
             Some(ok.consumer_count),
         ))
@@ -290,13 +291,13 @@ impl Channel {
             durable: false,
             exclusive: false,
             auto_delete: false,
-            arguments: FieldTable::new(),
+            arguments: FieldTable::default(),
         };
         let declare = AmqpQueue::Declare(options.into_declare(queue.into(), true, false));
         let ok = self.call::<_, QueueDeclareOk>(declare)?;
         Ok(Queue::new(
             self,
-            ok.queue,
+            ok.queue.to_string(),
             Some(ok.message_count),
             Some(ok.consumer_count),
         ))
@@ -314,8 +315,7 @@ impl Channel {
     /// to you on demand instead of polling with `get`.
     pub fn basic_get<S: Into<String>>(&self, queue: S, no_ack: bool) -> Result<Option<Get>> {
         self.inner.borrow_mut().get(AmqpGet {
-            ticket: 0,
-            queue: queue.into(),
+            queue: queue.into().into(), // S -> String -> ShortString
             no_ack,
         })
     }
@@ -334,9 +334,8 @@ impl Channel {
         // 2. The I/O loop allocates the channel to send deliveries when it
         //    receives consume-ok.
         let (tag, rx) = self.inner.borrow_mut().consume(Consume {
-            ticket: 0,
-            queue: queue.into(),
-            consumer_tag: String::new(),
+            queue: queue.into().into(), // S -> String -> ShortString
+            consumer_tag: ShortString::default(),
             no_local: options.no_local,
             no_ack: options.no_ack,
             exclusive: options.exclusive,
@@ -360,10 +359,9 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpQueue::Bind(QueueBind {
-            ticket: 0,
-            queue: queue.into(),
-            exchange: exchange.into(),
-            routing_key: routing_key.into(),
+            queue: queue.into().into(),
+            exchange: exchange.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: false,
             arguments,
         });
@@ -384,10 +382,9 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpQueue::Bind(QueueBind {
-            ticket: 0,
-            queue: queue.into(),
-            exchange: exchange.into(),
-            routing_key: routing_key.into(),
+            queue: queue.into().into(),
+            exchange: exchange.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: true,
             arguments,
         });
@@ -408,10 +405,9 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let unbind = AmqpQueue::Unbind(QueueUnbind {
-            ticket: 0,
-            queue: queue.into(),
-            exchange: exchange.into(),
-            routing_key: routing_key.into(),
+            queue: queue.into().into(),
+            exchange: exchange.into().into(),
+            routing_key: routing_key.into().into(),
             arguments,
         });
         self.call::<_, QueueUnbindOk>(unbind).map(|_| ())
@@ -425,8 +421,7 @@ impl Channel {
     /// [`Queue::purge`](struct.Queue.html#method.purge) to avoid this.
     pub fn queue_purge<S: Into<String>>(&self, queue: S) -> Result<u32> {
         let purge = AmqpQueue::Purge(QueuePurge {
-            ticket: 0,
-            queue: queue.into(),
+            queue: queue.into().into(), // S -> String -> ShortString
             nowait: false,
         });
         self.call::<_, QueuePurgeOk>(purge)
@@ -440,8 +435,7 @@ impl Channel {
     /// [`Queue::purge_nowait`](struct.Queue.html#method.purge_nowait) to avoid this.
     pub fn queue_purge_nowait<S: Into<String>>(&self, queue: S) -> Result<()> {
         let purge = AmqpQueue::Purge(QueuePurge {
-            ticket: 0,
-            queue: queue.into(),
+            queue: queue.into().into(),
             nowait: true,
         });
         self.call_nowait(purge)
@@ -522,7 +516,7 @@ impl Channel {
             durable: false,
             auto_delete: false,
             internal: false,
-            arguments: FieldTable::new(),
+            arguments: FieldTable::default(),
         };
         let declare =
             AmqpExchange::Declare(options.into_declare(type_, exchange.clone(), true, false));
@@ -548,10 +542,9 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpExchange::Bind(ExchangeBind {
-            ticket: 0,
-            destination: destination.into(),
-            source: source.into(),
-            routing_key: routing_key.into(),
+            destination: destination.into().into(),
+            source: source.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: false,
             arguments,
         });
@@ -576,10 +569,9 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let bind = AmqpExchange::Bind(ExchangeBind {
-            ticket: 0,
-            destination: destination.into(),
-            source: source.into(),
-            routing_key: routing_key.into(),
+            destination: destination.into().into(),
+            source: source.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: true,
             arguments,
         });
@@ -604,10 +596,9 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let unbind = AmqpExchange::Unbind(ExchangeUnbind {
-            ticket: 0,
-            destination: destination.into(),
-            source: source.into(),
-            routing_key: routing_key.into(),
+            destination: destination.into().into(),
+            source: source.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: false,
             arguments,
         });
@@ -634,10 +625,9 @@ impl Channel {
         arguments: FieldTable,
     ) -> Result<()> {
         let unbind = AmqpExchange::Unbind(ExchangeUnbind {
-            ticket: 0,
-            destination: destination.into(),
-            source: source.into(),
-            routing_key: routing_key.into(),
+            destination: destination.into().into(),
+            source: source.into().into(),
+            routing_key: routing_key.into().into(),
             nowait: true,
             arguments,
         });
@@ -652,8 +642,7 @@ impl Channel {
     /// `if_unused` was true and it has queue bindings), it will close this channel.
     pub fn exchange_delete<S: Into<String>>(&self, exchange: S, if_unused: bool) -> Result<()> {
         let delete = AmqpExchange::Delete(ExchangeDelete {
-            ticket: 0,
-            exchange: exchange.into(),
+            exchange: exchange.into().into(),
             if_unused,
             nowait: false,
         });
@@ -672,8 +661,7 @@ impl Channel {
         if_unused: bool,
     ) -> Result<()> {
         let delete = AmqpExchange::Delete(ExchangeDelete {
-            ticket: 0,
-            exchange: exchange.into(),
+            exchange: exchange.into().into(),
             if_unused,
             nowait: true,
         });
@@ -732,7 +720,7 @@ impl Channel {
         // to not supproting nowait consume - we want the cancel-ok to clean
         // up channels in the I/O loop.
         self.call::<_, CancelOk>(AmqpBasic::Cancel(Cancel {
-            consumer_tag: consumer.consumer_tag().to_string(),
+            consumer_tag: consumer.consumer_tag().into(),
             nowait: false,
         }))
         .map(|_ok| ())
