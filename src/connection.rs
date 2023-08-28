@@ -548,7 +548,7 @@ mod amqp_url {
             // "amqp://host/" should have a vhost of Some(""). But we can't tell
             // the difference between these two with the url lib, so we'll just toss
             // out the latter. We now have no way of specifying a vhost of "".
-            if vhost != "" {
+            if !vhost.is_empty() {
                 options = options.virtual_host(percent_decode(vhost));
             }
 

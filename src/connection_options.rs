@@ -211,9 +211,9 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         let frame_max = u32::min(frame_max0, frame_max1);
         let heartbeat = u16::min(tune.heartbeat, self.heartbeat);
 
-        if frame_max < u32::from(FRAME_MIN_SIZE) {
+        if frame_max < FRAME_MIN_SIZE {
             return FrameMaxTooSmallSnafu {
-                min: u32::from(FRAME_MIN_SIZE),
+                min: FRAME_MIN_SIZE,
                 requested: frame_max,
             }
             .fail();

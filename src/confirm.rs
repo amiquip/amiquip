@@ -120,18 +120,18 @@ impl ConfirmSmoother {
     /// expected delivery tag and we had not previously seen the next tag), or multiple items (if
     /// `confirm` is a `multiple: true` confirmation or we've previously seen out-of-order tags
     /// that are next sequentially after `confirm`'s tag).
-    pub fn process<'a>(&'a mut self, confirm: Confirm) -> impl Iterator<Item = Confirm> + 'a {
+    pub fn process(&mut self, confirm: Confirm) -> impl Iterator<Item = Confirm> + '_ {
         match confirm {
             Confirm::Ack(inner) => self.new_iter(inner, Confirm::Ack),
             Confirm::Nack(inner) => self.new_iter(inner, Confirm::Nack),
         }
     }
 
-    fn new_iter<'a>(
-        &'a mut self,
+    fn new_iter(
+        &mut self,
         payload: ConfirmPayload,
         to_confirm: fn(ConfirmPayload) -> Confirm,
-    ) -> impl Iterator<Item = Confirm> + 'a {
+    ) -> impl Iterator<Item = Confirm> + '_ {
         Iter {
             parent: self,
             payload,

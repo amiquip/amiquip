@@ -4,6 +4,16 @@
   * amq-protocol (now 7.1)
   * cookie-factory (now 0.3)
 * Deprecated `Channel::qos()` in favor of `Channel::set_qos()`
+* `Error::__Nonexhaustive` replaced with `non_exhaustive` attribute
+* Switch to 2021 Edition
+* Update several other dependencies:
+  * built (now 0.6.1)
+  * bytes (now 1.4)
+  * env_loger (now 0.10)
+  * indexmap (now 2.0)
+  * percent-encoding (now 2.3)
+  * url (now 2.4.0)
+  * uuid (now 1.4)
 
 # Version 0.4.2 (2022-01-12)
 

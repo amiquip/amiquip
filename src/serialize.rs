@@ -12,13 +12,13 @@ use amq_protocol::protocol::AMQPClass;
 use std::ops::{Index, RangeFrom};
 
 pub(crate) trait TryFromAmqpClass: Sized {
-    fn try_from(class: AMQPClass) -> Result<Self>;
+    fn try_from_class(class: AMQPClass) -> Result<Self>;
 }
 
 macro_rules! impl_try_from_class {
     ($type:ty, $class:path, $method:path) => {
         impl TryFromAmqpClass for $type {
-            fn try_from(class: AMQPClass) -> Result<Self> {
+            fn try_from_class(class: AMQPClass) -> Result<Self> {
                 match class {
                     $class($method(val)) => Ok(val),
                     _ => FrameUnexpectedSnafu.fail(),
@@ -145,15 +145,15 @@ impl_try_from_class!(
 );
 
 pub(crate) trait TryFromAmqpFrame: Sized {
-    fn try_from(channel_id: u16, frame: AMQPFrame) -> Result<Self>;
+    fn try_from_frame(channel_id: u16, frame: AMQPFrame) -> Result<Self>;
 }
 
 impl<T: TryFromAmqpClass> TryFromAmqpFrame for T {
-    fn try_from(expected_id: u16, frame: AMQPFrame) -> Result<Self> {
+    fn try_from_frame(expected_id: u16, frame: AMQPFrame) -> Result<Self> {
         match frame {
             AMQPFrame::Method(channel_id, method) => {
                 if expected_id == channel_id {
-                    Self::try_from(method)
+                    Self::try_from_class(method)
                 } else {
                     FrameUnexpectedSnafu.fail()
                 }

@@ -9,6 +9,7 @@ pub type Result<T, E = Error> = result::Result<T, E>;
 /// Specific error cases returned by amiquip.
 #[derive(Snafu, Debug)]
 #[snafu(visibility(pub(crate)))]
+#[non_exhaustive]
 pub enum Error {
     /// URL parsing failed.
     #[snafu(display("could not parse url: {}", source))]
@@ -269,9 +270,6 @@ pub enum Error {
         channel_id: u16,
         consumer_tag: String,
     },
-
-    #[doc(hidden)]
-    __Nonexhaustive,
 }
 
 #[cfg(test)]
