@@ -1,8 +1,8 @@
 [package]
 name = "amiquip"
-version = "0.4.2"
+version = "0.5.0"
 authors = ["John Gallagher <johnkgallagher@gmail.com>"]
-edition = "2018"
+edition = "2021"
 build = "build.rs"
 description = "Pure Rust RabbitMQ client"
 repository = "https://github.com/jgallagher/amiquip"
@@ -20,22 +20,22 @@ default = ["native-tls"]
 [dependencies]
 snafu = { version = "0.7", default-features = false, features = ["std"]}
 input_buffer = "0.5"
-bytes = "1.1"
-amq-protocol = "1.4"
+bytes = "1.4"
+amq-protocol = "7.1"
 log = "0.4"
 mio = "0.6"
 mio-extras = "2.0"
-cookie-factory = "0.2"
+cookie-factory = "0.3"
 crossbeam-channel = "0.5"
-indexmap = "1.6"
-url = "2.2.2"
+indexmap = "2.0"
+url = "2.4.0"
 native-tls = { version = "0.2", optional = true }
-percent-encoding = "2.1"
+percent-encoding = "2.3"
 
 [build-dependencies]
-built = "0.5.1"
+built = "0.6.1"
 
 [dev-dependencies]
-uuid = { version = "0.8", features = [ "v4" ] }
-env_logger = "0.9"
+uuid = { version = "1.4", features = [ "v4" ] }
+env_logger = "0.10"
 mockstream = "0.0.3"

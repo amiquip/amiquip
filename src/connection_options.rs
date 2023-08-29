@@ -133,25 +133,27 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
 
         // ensure our requested auth mechanism and locale are available
         let mechanism = self.auth.mechanism();
-        if !server_supports(&start.mechanisms, &mechanism) {
+        let available = start.mechanisms.to_string();
+        if !server_supports(&available, &mechanism) {
             return UnsupportedAuthMechanismSnafu {
-                available: start.mechanisms,
+                available,
                 requested: mechanism,
             }
             .fail();
         }
-        if !server_supports(&start.locales, &self.locale) {
+        let locales = start.locales.to_string();
+        if !server_supports(&locales, &self.locale) {
             return UnsupportedLocaleSnafu {
-                available: start.locales,
+                available: locales,
                 requested: self.locale.clone(),
             }
             .fail();
         }
 
         // bundle up info about this crate as client properties
-        let mut client_properties = FieldTable::new();
+        let mut client_properties = FieldTable::default();
         let mut set_prop = |k: &str, v: String| {
-            client_properties.insert(k.to_string(), AMQPValue::LongString(v));
+            client_properties.insert(k.into(), AMQPValue::LongString(v.into()));
         };
         set_prop("product", crate::built_info::PKG_NAME.to_string());
         set_prop("version", crate::built_info::PKG_VERSION.to_string());
@@ -166,23 +168,20 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         if let Some(information) = &self.information {
             set_prop("information", information.to_string());
         }
-        let mut capabilities = FieldTable::new();
+        let mut capabilities = FieldTable::default();
         let mut set_cap = |k: &str| {
-            capabilities.insert(k.to_string(), AMQPValue::Boolean(true));
+            capabilities.insert(k.into(), AMQPValue::Boolean(true));
         };
         set_cap("consumer_cancel_notify");
         set_cap("connection.blocked");
-        client_properties.insert(
-            "capabilities".to_string(),
-            AMQPValue::FieldTable(capabilities),
-        );
+        client_properties.insert("capabilities".into(), AMQPValue::FieldTable(capabilities));
 
         Ok((
             StartOk {
                 client_properties,
-                mechanism,
-                response: self.auth.response(),
-                locale: self.locale.clone(),
+                mechanism: mechanism.into(),
+                response: self.auth.response().into(),
+                locale: self.locale.clone().into(),
             },
             start.server_properties,
         ))
@@ -212,9 +211,9 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
         let frame_max = u32::min(frame_max0, frame_max1);
         let heartbeat = u16::min(tune.heartbeat, self.heartbeat);
 
-        if frame_max < u32::from(FRAME_MIN_SIZE) {
+        if frame_max < FRAME_MIN_SIZE {
             return FrameMaxTooSmallSnafu {
-                min: u32::from(FRAME_MIN_SIZE),
+                min: FRAME_MIN_SIZE,
                 requested: frame_max,
             }
             .fail();
@@ -229,9 +228,7 @@ impl<Auth: Sasl> ConnectionOptions<Auth> {
 
     pub(crate) fn make_open(&self) -> Open {
         Open {
-            virtual_host: self.virtual_host.clone(),
-            capabilities: "".to_string(), // reserved
-            insist: false,                // reserved
+            virtual_host: self.virtual_host.clone().into(),
         }
     }
 }
@@ -285,9 +282,9 @@ mod tests {
         let start = Start {
             version_major: 0,
             version_minor: 9,
-            server_properties: FieldTable::new(),
-            mechanisms: server_mechanisms.to_string(),
-            locales: options.locale.clone(),
+            server_properties: FieldTable::default(),
+            mechanisms: server_mechanisms.into(),
+            locales: options.locale.clone().into(),
         };
 
         let res = options.make_start_ok(start);
@@ -307,9 +304,9 @@ mod tests {
         let start = Start {
             version_major: 0,
             version_minor: 9,
-            server_properties: FieldTable::new(),
-            mechanisms: options.auth.mechanism(),
-            locales: server_locales.to_string(),
+            server_properties: FieldTable::default(),
+            mechanisms: options.auth.mechanism().into(),
+            locales: server_locales.into(),
         };
 
         let res = options.make_start_ok(start);

@@ -32,9 +32,9 @@ impl Return {
     pub(crate) fn new(ret: AmqpReturn, content: Vec<u8>, properties: AmqpProperties) -> Return {
         Return {
             reply_code: ret.reply_code,
-            reply_text: ret.reply_text,
-            exchange: ret.exchange,
-            routing_key: ret.routing_key,
+            reply_text: ret.reply_text.to_string(),
+            exchange: ret.exchange.to_string(),
+            routing_key: ret.routing_key.to_string(),
             content,
             properties,
         }

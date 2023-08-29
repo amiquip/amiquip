@@ -349,7 +349,7 @@ impl IoLoop {
             HandshakeState::Done(tune_ok, server_properties) => Ok((tune_ok, server_properties)),
             HandshakeState::ServerClosing(close) => ServerClosedConnectionSnafu {
                 code: close.reply_code,
-                message: close.reply_text,
+                message: close.reply_text.to_string(),
             }
             .fail(),
         }
@@ -416,7 +416,7 @@ impl IoLoop {
             ConnectionState::Steady(_) => unreachable!(),
             ConnectionState::ServerClosing(close) => ServerClosedConnectionSnafu {
                 code: close.reply_code,
-                message: close.reply_text,
+                message: close.reply_text.to_string(),
             }
             .fail(),
             ConnectionState::ClientException => ClientExceptionSnafu.fail(),
@@ -721,7 +721,7 @@ impl Inner {
                         // enqueuing up a heartbeat frame
                         if self.outbuf.is_empty() {
                             debug!("sending heartbeat");
-                            self.outbuf.push_heartbeat();
+                            self.outbuf.push_heartbeat(0);
                         } else {
                             warn!("tx heartbeat fired, but already have queued data to write - possible socket problem");
                         }

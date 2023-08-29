@@ -28,7 +28,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
 
         match self {
             HandshakeState::Start(options) => {
-                let start = Start::try_from(0, frame)?;
+                let start = Start::try_from_frame(0, frame)?;
                 debug!("received handshake {:?}", start);
 
                 let (start_ok, server_properties) = options.make_start_ok(start)?;
@@ -40,7 +40,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
             HandshakeState::Secure(options, server_properties) => {
                 // We currently only support PLAIN and EXTERNAL, neither of which
                 // need a secure/secure-ok
-                if let Ok(secure) = Secure::try_from(0, frame.clone()) {
+                if let Ok(secure) = Secure::try_from_frame(0, frame.clone()) {
                     error!("received unsupported handshake {:?}", secure);
                     return SaslSecureNotSupportedSnafu.fail();
                 }
@@ -48,7 +48,7 @@ impl<Auth: Sasl> HandshakeState<Auth> {
                 return self.process(inner, frame);
             }
             HandshakeState::Tune(options, server_properties) => {
-                let tune = Tune::try_from(0, frame)?;
+                let tune = Tune::try_from_frame(0, frame)?;
                 debug!("received handshake {:?}", tune);
 
                 let tune_ok = options.make_tune_ok(tune)?;
@@ -65,14 +65,14 @@ impl<Auth: Sasl> HandshakeState<Auth> {
             }
             HandshakeState::Open(tune_ok, server_properties) => {
                 // If we sent bad tune params, server might send us a Close.
-                if let Ok(close) = Close::try_from(0, frame.clone()) {
+                if let Ok(close) = Close::try_from_frame(0, frame.clone()) {
                     inner.push_method(0, AmqpConnection::CloseOk(CloseOk {}));
                     inner.seal_writes();
                     *self = HandshakeState::ServerClosing(close);
                     return Ok(());
                 }
 
-                let open_ok = OpenOk::try_from(0, frame)?;
+                let open_ok = OpenOk::try_from_frame(0, frame)?;
                 debug!("received handshake {:?}", open_ok);
 
                 *self = HandshakeState::Done(tune_ok.clone(), server_properties.clone());

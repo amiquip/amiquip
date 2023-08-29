@@ -32,13 +32,13 @@ impl Delivery {
         properties: AmqpProperties,
     ) -> (String, Delivery) {
         (
-            deliver.consumer_tag,
+            deliver.consumer_tag.as_str().to_owned(),
             Delivery {
                 channel_id,
                 delivery_tag: deliver.delivery_tag,
                 redelivered: deliver.redelivered,
-                exchange: deliver.exchange,
-                routing_key: deliver.routing_key,
+                exchange: deliver.exchange.to_string(),
+                routing_key: deliver.routing_key.to_string(),
                 body,
                 properties,
             },
@@ -55,8 +55,8 @@ impl Delivery {
             channel_id,
             delivery_tag: get_ok.delivery_tag,
             redelivered: get_ok.redelivered,
-            exchange: get_ok.exchange,
-            routing_key: get_ok.routing_key,
+            exchange: get_ok.exchange.to_string(),
+            routing_key: get_ok.routing_key.to_string(),
             body,
             properties,
         }

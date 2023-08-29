@@ -96,7 +96,10 @@ impl<T> ChannelSlots<T> {
 
         // At the end of our rope for simple channel allocation; fall back to finding
         // one that has been previously freed.
-        let channel_id = self.freed_channel_ids.pop().context(ExhaustedChannelIdsSnafu)?;
+        let channel_id = self
+            .freed_channel_ids
+            .pop()
+            .context(ExhaustedChannelIdsSnafu)?;
         match self.slots.entry(channel_id) {
             Entry::Occupied(_) => unreachable!("free channel id cannot be occupied"),
             Entry::Vacant(entry) => {

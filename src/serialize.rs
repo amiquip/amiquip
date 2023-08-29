@@ -1,7 +1,5 @@
 use crate::errors::*;
-use amq_protocol::frame::generation::{
-    gen_content_body_frame, gen_content_header_frame, gen_heartbeat_frame, gen_method_frame,
-};
+use amq_protocol::frame::AMQPContentHeader;
 use amq_protocol::frame::AMQPFrame;
 use amq_protocol::protocol::basic::AMQPMethod as AmqpBasic;
 use amq_protocol::protocol::basic::AMQPProperties;
@@ -11,18 +9,16 @@ use amq_protocol::protocol::connection::AMQPMethod as AmqpConnection;
 use amq_protocol::protocol::exchange::AMQPMethod as AmqpExchange;
 use amq_protocol::protocol::queue::AMQPMethod as AmqpQueue;
 use amq_protocol::protocol::AMQPClass;
-use cookie_factory::GenError;
 use std::ops::{Index, RangeFrom};
-use std::result::Result as StdResult;
 
-pub trait TryFromAmqpClass: Sized {
-    fn try_from(class: AMQPClass) -> Result<Self>;
+pub(crate) trait TryFromAmqpClass: Sized {
+    fn try_from_class(class: AMQPClass) -> Result<Self>;
 }
 
 macro_rules! impl_try_from_class {
     ($type:ty, $class:path, $method:path) => {
         impl TryFromAmqpClass for $type {
-            fn try_from(class: AMQPClass) -> Result<Self> {
+            fn try_from_class(class: AMQPClass) -> Result<Self> {
                 match class {
                     $class($method(val)) => Ok(val),
                     _ => FrameUnexpectedSnafu.fail(),
@@ -149,15 +145,15 @@ impl_try_from_class!(
 );
 
 pub(crate) trait TryFromAmqpFrame: Sized {
-    fn try_from(channel_id: u16, frame: AMQPFrame) -> Result<Self>;
+    fn try_from_frame(channel_id: u16, frame: AMQPFrame) -> Result<Self>;
 }
 
 impl<T: TryFromAmqpClass> TryFromAmqpFrame for T {
-    fn try_from(expected_id: u16, frame: AMQPFrame) -> Result<Self> {
+    fn try_from_frame(expected_id: u16, frame: AMQPFrame) -> Result<Self> {
         match frame {
             AMQPFrame::Method(channel_id, method) => {
                 if expected_id == channel_id {
-                    Self::try_from(method)
+                    Self::try_from_class(method)
                 } else {
                     FrameUnexpectedSnafu.fail()
                 }
@@ -167,7 +163,7 @@ impl<T: TryFromAmqpClass> TryFromAmqpFrame for T {
     }
 }
 
-pub trait IntoAmqpClass {
+pub(crate) trait IntoAmqpClass {
     fn into_class(self) -> AMQPClass;
 }
 
@@ -211,7 +207,7 @@ impl IntoAmqpClass for AmqpExchange {
 pub(crate) struct OutputBuffer(Vec<u8>);
 
 impl OutputBuffer {
-    pub fn with_protocol_header() -> OutputBuffer {
+    pub(crate) fn with_protocol_header() -> OutputBuffer {
         OutputBuffer(b"AMQP\x00\x00\x09\x01".to_vec())
     }
 
@@ -225,21 +221,20 @@ impl OutputBuffer {
         buf
     }
 
-    pub fn push_heartbeat(&mut self) {
+    pub(crate) fn push_heartbeat(&mut self, channel_id: u16) {
         // serializing heartbeat cannot fail; safe to unwrap.
-        serialize(&mut self.0, |buf, pos| gen_heartbeat_frame((buf, pos)))
+        let frame = AMQPFrame::Heartbeat(channel_id);
+        self.append_frame(frame);
     }
 
     // This can only fail if there is a bug in the serialization library; it is probably
     // safe to unwrap, but little cost to return a Result instead.
-    pub fn push_method<M>(&mut self, channel_id: u16, method: M)
+    pub(crate) fn push_method<M>(&mut self, channel_id: u16, method: M)
     where
         M: IntoAmqpClass,
     {
-        let class = method.into_class();
-        serialize(&mut self.0, |buf, pos| {
-            gen_method_frame((buf, pos), channel_id, &class)
-        })
+        let frame = AMQPFrame::Method(channel_id, method.into_class());
+        self.append_frame(frame);
     }
 
     pub(crate) fn push_content_header(
@@ -249,40 +244,48 @@ impl OutputBuffer {
         length: usize,
         properties: &AMQPProperties,
     ) {
-        let length = length as u64;
-        serialize(&mut self.0, |buf, pos| {
-            gen_content_header_frame((buf, pos), channel_id, class_id, length, properties)
-        })
+        let header = Box::new(AMQPContentHeader {
+            class_id,
+            body_size: length as u64,
+            properties: properties.to_owned(),
+        });
+        let frame = AMQPFrame::Header(channel_id, class_id, header);
+        self.append_frame(frame);
     }
 
     pub(crate) fn push_content_body(&mut self, channel_id: u16, content: &[u8]) {
-        serialize(&mut self.0, |buf, pos| {
-            gen_content_body_frame((buf, pos), channel_id, content)
-        })
+        let frame = AMQPFrame::Body(channel_id, content.into());
+        self.append_frame(frame);
+    }
+
+    fn append_frame(&mut self, frame: AMQPFrame) {
+        let serialize_fn = amq_protocol::frame::gen_frame(&frame);
+        let (mut buf, _) = serialize_fn(Vec::<u8>::new().into()).unwrap().into_inner();
+        self.0.append(&mut buf);
     }
 
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
     #[inline]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
 
     #[inline]
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.0.clear()
     }
 
     #[inline]
-    pub fn drain_written(&mut self, n: usize) {
+    pub(crate) fn drain_written(&mut self, n: usize) {
         self.0.drain(0..n);
     }
 
     #[inline]
-    pub fn append(&mut self, mut other: OutputBuffer) {
+    pub(crate) fn append(&mut self, mut other: OutputBuffer) {
         self.0.append(&mut other.0)
     }
 }
@@ -317,9 +320,9 @@ impl SealableOutputBuffer {
     }
 
     #[inline]
-    pub(super) fn push_heartbeat(&mut self) {
+    pub(super) fn push_heartbeat(&mut self, channel_id: u16) {
         if !self.sealed {
-            self.buf.push_heartbeat();
+            self.buf.push_heartbeat(channel_id);
         }
     }
 
@@ -370,17 +373,64 @@ impl Index<RangeFrom<usize>> for SealableOutputBuffer {
     }
 }
 
-fn serialize<F: Fn(&mut [u8], usize) -> StdResult<(&mut [u8], usize), GenError>>(
-    buf: &mut Vec<u8>,
-    f: F,
-) {
-    let pos = buf.len();
-    loop {
-        let resize_to = match f(buf, pos) {
-            Ok(_) => return,
-            Err(GenError::BufferTooSmall(n)) => n,
-            Err(err) => unreachable!("impossible serialization error: {:?}", err),
-        };
-        buf.resize(resize_to, 0);
+#[cfg(test)]
+mod test {
+    use super::*;
+    use amq_protocol::protocol::basic::{AMQPMethod, CancelOk, Publish};
+
+    #[test]
+    fn test_heartbeat() {
+        let mut buf = OutputBuffer::empty();
+        buf.push_heartbeat(3);
+        let expected = [8, 0, 3, 0, 0, 0, 0, 206];
+        assert_eq!(buf.0, &expected);
+    }
+
+    #[test]
+    fn test_method() {
+        let mut buf = OutputBuffer::empty();
+        let method = AMQPMethod::CancelOk(CancelOk {
+            consumer_tag: "tag".into(),
+        });
+        buf.push_method(3, method);
+        let expected = [1, 0, 3, 0, 0, 0, 8, 0, 60, 0, 31, 3, 116, 97, 103, 206];
+        assert_eq!(buf.0, &expected);
+    }
+
+    #[test]
+    fn test_content_header() {
+        let mut buf = OutputBuffer::empty();
+        let properties = AMQPProperties::default();
+        let class_id = Publish::default().get_amqp_class_id();
+        buf.push_content_header(3, class_id, 0, &properties);
+        let expected = [
+            2, 0, 3, 0, 0, 0, 14, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 206,
+        ];
+        assert_eq!(buf.0, &expected);
+    }
+
+    #[test]
+    fn test_content_body() {
+        let mut buf = OutputBuffer::empty();
+        buf.push_content_body(3, "test body".as_bytes());
+        let expected = [
+            3, 0, 3, 0, 0, 0, 9, 116, 101, 115, 116, 32, 98, 111, 100, 121, 206,
+        ];
+        assert_eq!(buf.0, &expected);
+    }
+
+    #[test]
+    fn test_multi() {
+        let mut buf = OutputBuffer::empty();
+        let properties = AMQPProperties::default();
+        let body = "test body";
+        let class_id = Publish::default().get_amqp_class_id();
+        buf.push_content_header(3, class_id, body.len(), &properties);
+        buf.push_content_body(3, body.as_bytes());
+        let expected = [
+            2, 0, 3, 0, 0, 0, 14, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 206, 3, 0, 3, 0, 0, 0,
+            9, 116, 101, 115, 116, 32, 98, 111, 100, 121, 206,
+        ];
+        assert_eq!(buf.0, &expected);
     }
 }

@@ -15,8 +15,8 @@ use std::cell::Cell;
 ///
 /// ```rust
 /// # use amiquip::{AmqpValue, ConsumerOptions, FieldTable};
-/// let mut arguments = FieldTable::new();
-/// arguments.insert("x-priority".to_string(), AmqpValue::ShortInt(10));
+/// let mut arguments = FieldTable::default();
+/// arguments.insert("x-priority".into(), AmqpValue::ShortInt(10));
 /// let options = ConsumerOptions {
 ///     arguments,
 ///     ..ConsumerOptions::default()
@@ -164,7 +164,7 @@ impl Consumer<'_> {
             return Ok(());
         }
         self.cancelled.set(true);
-        self.channel.basic_cancel(&self)
+        self.channel.basic_cancel(self)
     }
 
     /// Calls [`Delivery::ack`](struct.Delivery.html#method.ack) on `delivery` using the channel
